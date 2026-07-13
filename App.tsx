@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, Download, Settings, Users, ArrowRight, CheckCircle, AlertTriangle, FileSpreadsheet, RefreshCw, Layers, Sliders } from 'lucide-react';
+import { Upload, Download, Settings, Users, ArrowRight, CheckCircle, AlertTriangle, FileSpreadsheet, RefreshCw, Layers, Sliders, ShieldCheck } from 'lucide-react';
 import { Student, ClassSettings, PlacementResult } from './types';
 import { parseExcel, generateTemplate, generateSampleData, downloadResultsByNewClass, downloadResultsByOldClass } from './utils/excel';
 import { runPlacementAlgorithm } from './utils/algorithm';
@@ -98,6 +98,10 @@ const App: React.FC = () => {
                 복잡한 학생 배정, 이제 클릭 한 번으로 끝내세요.<br/>
                 성별, 성적, 생활지도 등 모든 조건을 고려하여 최적의 학급을 편성합니다.
             </p>
+            <div className="inline-flex items-center gap-2 mt-4 px-4 py-1.5 bg-indigo-500/30 border border-indigo-400/30 rounded-full text-xs text-indigo-100 backdrop-blur-sm">
+                <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>개인정보 안심: 모든 데이터는 브라우저 내부(로컬)에서만 연산되며 절대 외부에 전송되지 않습니다.</span>
+            </div>
         </div>
       </header>
 
