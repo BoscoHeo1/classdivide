@@ -52,6 +52,8 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
   const [joinCodeInput, setJoinCodeInput] = useState<string>('');
   const [myClassNum, setMyClassNum] = useState<number>(1);
   const [teacherNameInput, setTeacherNameInput] = useState<string>('');
+  const [joinRole, setJoinRole] = useState<'teacher' | 'host'>('teacher');
+  const [joinAdminPassword, setJoinAdminPassword] = useState<string>('');
 
   // 5. 작업 탭
   const [activeClassTab, setActiveClassTab] = useState<number>(1); // 0 = 전체 취합 현황판, 1~N = 각 반
@@ -151,7 +153,7 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
     }
   };
 
-  // 방 입장 (참여자)
+  // 방 입장 (담임교사 또는 학년부장 재입장)
   const handleJoinRoom = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!joinCodeInput.trim()) {
@@ -166,8 +168,25 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
       if (!data) {
         throw new Error(`방 코드 [${joinCodeInput.toUpperCase()}]를 찾을 수 없습니다. 코드를 확인해주세요.`);
       }
+
+      if (joinRole === 'host') {
+        if (!joinAdminPassword.trim()) {
+          throw new Error('학년부장으로 입장하시려면 개설 시 설정하신 관리 비밀번호를 입력해주세요.');
+        }
+        if (data.password !== joinAdminPassword.trim()) {
+          throw new Error('관리자 비밀번호가 일치하지 않습니다. 비밀번호를 다시 확인해주세요.');
+        }
+        // 관리자 인증 성공
+        setIsHost(true);
+        localStorage.setItem(`classdivide_host_${data.code}`, 'true');
+        alert('👑 학년부장(관리자) 권한으로 성공적으로 재입장하였습니다!');
+      } else {
+        // 일반 담임교사 입장
+        setIsHost(false);
+        setActiveClassTab(myClassNum);
+      }
+
       setCurrentCode(data.code);
-      setActiveClassTab(myClassNum);
     } catch (err: any) {
       setError(err.message || '방 입장 중 오류가 발생했습니다.');
     } finally {
@@ -519,17 +538,43 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
             </div>
           </div>
 
-          {/* 카드 2: 방 참여 (동학년 담임용) */}
+          {/* 카드 2: 방 입장 (동학년 담임교사 & 학년부장 재입장) */}
           <div className="bg-white border-2 border-emerald-100 hover:border-emerald-300 rounded-3xl p-8 shadow-xs transition flex flex-col justify-between">
             <div>
-              <div className="w-12 h-12 rounded-2xl bg-emerald-600 text-white flex items-center justify-center mb-6 shadow-md shadow-emerald-100">
-                <UserCheck size={24} />
+              <div className="flex items-center justify-between mb-4">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shadow-md shadow-emerald-100">
+                  <UserCheck size={24} />
+                </div>
+                {/* 역할 선택 탭 토글 */}
+                <div className="bg-slate-100 p-1 rounded-xl flex gap-1 border border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => setJoinRole('teacher')}
+                    className={`px-3 py-1.5 text-xs font-black rounded-lg transition cursor-pointer flex items-center gap-1 ${
+                      joinRole === 'teacher' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <UserCheck size={13} /> 담임교사
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setJoinRole('host')}
+                    className={`px-3 py-1.5 text-xs font-black rounded-lg transition cursor-pointer flex items-center gap-1 ${
+                      joinRole === 'host' ? 'bg-amber-500 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <Crown size={13} /> 학년부장 재입장
+                  </button>
+                </div>
               </div>
+
               <h3 className="text-xl font-black text-slate-800 mb-2">
-                2. 학년 방 참여하기 (담임교사용)
+                2. 개설된 학년 방 입장하기
               </h3>
-              <p className="text-xs text-slate-500 mb-6 leading-relaxed">
-                학년부장 선생님께 공유받은 방 참여 코드를 입력하고 내 반 탭에 접속하여 학생을 등록하세요.
+              <p className="text-xs text-slate-500 mb-5 leading-relaxed">
+                {joinRole === 'teacher'
+                  ? '공유받은 방 코드를 입력하고 내 반 탭에 접속하여 학생을 등록하세요.'
+                  : '방을 나갔던 학년부장 선생님께서는 관리 비밀번호를 입력하고 관리자 권한으로 재입장하세요.'}
               </p>
 
               <form onSubmit={handleJoinRoom} className="space-y-4">
@@ -547,43 +592,77 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    담당 학급 선택 <span className="text-rose-500">*</span>
-                  </label>
-                  <select
-                    value={myClassNum}
-                    onChange={(e) => setMyClassNum(Number(e.target.value))}
-                    className="w-full px-4 py-2.5 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none bg-white"
-                  >
-                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(n => (
-                      <option key={n} value={n}>{n}반 담임</option>
-                    ))}
-                  </select>
-                </div>
+                {joinRole === 'teacher' ? (
+                  <>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        담당 학급 선택 <span className="text-rose-500">*</span>
+                      </label>
+                      <select
+                        value={myClassNum}
+                        onChange={(e) => setMyClassNum(Number(e.target.value))}
+                        className="w-full px-4 py-2.5 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none bg-white"
+                      >
+                        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(n => (
+                          <option key={n} value={n}>{n}반 담임</option>
+                        ))}
+                      </select>
+                    </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    선생님 성함 / 닉네임 (선택)
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="예: 김선생님"
-                    value={teacherNameInput}
-                    onChange={(e) => setTeacherNameInput(e.target.value)}
-                    className="w-full px-4 py-2.5 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                  />
-                </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        선생님 성함 / 닉네임 (선택)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="예: 김선생님"
+                        value={teacherNameInput}
+                        onChange={(e) => setTeacherNameInput(e.target.value)}
+                        className="w-full px-4 py-2.5 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                      />
+                    </div>
 
-                <div className="pt-8">
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-xl shadow-lg shadow-emerald-100 transition cursor-pointer flex items-center justify-center gap-2"
-                  >
-                    <UserCheck size={16} /> {loading ? '입장 중...' : '내 반으로 입장하기'}
-                  </button>
-                </div>
+                    <div className="pt-4">
+                      <button
+                        type="submit"
+                        disabled={loading}
+                        className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-xl shadow-lg shadow-emerald-100 transition cursor-pointer flex items-center justify-center gap-2"
+                      >
+                        <UserCheck size={16} /> {loading ? '입장 중...' : '내 반으로 입장하기'}
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        👑 관리자 비밀번호 <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="password"
+                        placeholder="방 개설 시 설정했던 비밀번호 입력"
+                        value={joinAdminPassword}
+                        onChange={(e) => setJoinAdminPassword(e.target.value)}
+                        className="w-full px-4 py-2.5 text-sm border border-amber-300 rounded-xl focus:ring-2 focus:ring-amber-500 focus:outline-none bg-amber-50/20"
+                        required
+                        autoFocus
+                      />
+                      <span className="text-[11px] text-amber-700 mt-1 block">
+                        비밀번호가 일치하면 즉시 학년부장(관리자) 권한이 복원되어 배정 실행이 가능합니다.
+                      </span>
+                    </div>
+
+                    <div className="pt-4">
+                      <button
+                        type="submit"
+                        disabled={loading}
+                        className="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white font-black text-sm rounded-xl shadow-lg shadow-amber-100 transition cursor-pointer flex items-center justify-center gap-2"
+                      >
+                        <Crown size={16} /> {loading ? '인증 및 입장 중...' : '👑 학년부장(관리자)으로 재입장'}
+                      </button>
+                    </div>
+                  </>
+                )}
               </form>
             </div>
 
@@ -593,11 +672,20 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
                   type="button"
                   onClick={() => {
                     const last = localStorage.getItem('classdivide_last_room');
-                    if (last) setCurrentCode(last);
+                    if (last) {
+                      const wasHost = localStorage.getItem(`classdivide_host_${last}`) === 'true';
+                      setIsHost(wasHost);
+                      setCurrentCode(last);
+                    }
                   }}
-                  className="text-xs text-indigo-600 hover:text-indigo-800 font-bold cursor-pointer"
+                  className="text-xs text-indigo-600 hover:text-indigo-800 font-bold cursor-pointer inline-flex items-center gap-1"
                 >
                   ⚡ 최근 참여했던 방 [{localStorage.getItem('classdivide_last_room')}] 바로 입장
+                  {localStorage.getItem(`classdivide_host_${localStorage.getItem('classdivide_last_room')}`) === 'true' && (
+                    <span className="bg-amber-100 text-amber-800 text-[10px] px-1.5 py-0.2 rounded font-black">
+                      👑 관리자 복원
+                    </span>
+                  )}
                 </button>
               </div>
             )}
@@ -653,10 +741,10 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
           ) : (
             <button
               onClick={() => setShowAdminAuthModal(true)}
-              className="bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-600 text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5 cursor-pointer transition"
-              title="관리 비밀번호를 입력하여 실행 권한을 획득합니다"
+              className="bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 text-xs font-black px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 cursor-pointer transition shadow-2xs"
+              title="관리 비밀번호를 입력하여 학년부장 실행 권한을 획득합니다"
             >
-              <Key size={13} /> 담임교사 모드 (관리자 전환)
+              <Crown size={13} className="text-amber-600" /> 👑 학년부장(관리자) 권한 인증
             </button>
           )}
 
