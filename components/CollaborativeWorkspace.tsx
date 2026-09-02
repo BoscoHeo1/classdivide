@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Users, ShieldCheck, Crown, UserCheck, Key, LogOut, CheckCircle2, 
+  Users, ShieldCheck, Crown, UserCheck, Key, LogOut, CheckCircle2, Settings, AlertOctagon, 
   Clock, Upload, Plus, Trash2, ArrowRight, ArrowLeft, RefreshCw, 
   Layers, Sparkles, Copy, Check, Download, AlertTriangle, FileSpreadsheet, Lock
 } from 'lucide-react';
 import { GradeWorkspace, Student, ClassSettings, PlacementResult } from '../types';
 import { 
   createWorkspace, getWorkspace, subscribeWorkspace, updateClassStudents, 
-  executeWorkspacePlacement, updateWorkspaceResult, resetWorkspaceToInput 
+  executeWorkspacePlacement, updateWorkspaceResult, resetWorkspaceToInput, 
+  updateWorkspaceSettings, deleteWorkspace 
 } from '../firebase';
 import { parseExcel, generateTemplate, downloadResultsByNewClass, downloadResultsByOldClass } from '../utils/excel';
 import { runPlacementAlgorithm } from '../utils/algorithm';
@@ -40,6 +41,16 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
   const [isHost, setIsHost] = useState<boolean>(false);
   const [showAdminAuthModal, setShowAdminAuthModal] = useState<boolean>(false);
   const [adminPasswordInput, setAdminPasswordInput] = useState<string>('');
+
+  // 2-1. 방 설정 수정 및 삭제 모달 상태
+  const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
+  const [editName, setEditName] = useState<string>('');
+  const [editCurrentClasses, setEditCurrentClasses] = useState<number>(6);
+  const [editNextClasses, setEditNextClasses] = useState<number>(6);
+  const [editReduction, setEditReduction] = useState<number>(2);
+  const [editAdminPassword, setEditAdminPassword] = useState<string>('');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<boolean>(false);
+  const [deletePasswordInput, setDeletePasswordInput] = useState<string>('');
 
   // 3. 방 개설 폼
   const [createName, setCreateName] = useState<string>('');
@@ -205,6 +216,73 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
       alert('👑 학년부장(관리자) 인증이 완료되었습니다! 배정 실행 및 모든 제어 권한이 활성화되었습니다.');
     } else {
       alert('비밀번호가 올바르지 않습니다.');
+    }
+  };
+
+  // 설정 모달 열기 (기존 값 주입)
+  const handleOpenSettingsModal = () => {
+    if (!workspace) return;
+    setEditName(workspace.name);
+    setEditCurrentClasses(workspace.currentClassCount);
+    setEditNextClasses(workspace.nextClassCount);
+    setEditReduction(workspace.reductionCount);
+    setEditAdminPassword('');
+    setShowDeleteConfirm(false);
+    setDeletePasswordInput('');
+    setShowSettingsModal(true);
+  };
+
+  // 방 설정 저장 처리
+  const handleSaveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!workspace || !isHost) return;
+
+    const pwd = prompt('설정을 변경하시려면 관리자 비밀번호를 입력해주세요:');
+    if (!pwd) return;
+
+    setLoading(true);
+    try {
+      await updateWorkspaceSettings(workspace.code, pwd, {
+        name: editName,
+        currentClassCount: editCurrentClasses,
+        nextClassCount: editNextClasses,
+        reductionCount: editReduction,
+        newPassword: editAdminPassword || undefined
+      });
+      setShowSettingsModal(false);
+      alert('⚙️ 학년 설정이 성공적으로 변경되었습니다! 동학년 모든 화면에 즉시 반영됩니다.');
+    } catch (err: any) {
+      alert('설정 변경 실패: ' + (err.message || ''));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 방 영구 삭제 처리
+  const handleDeleteRoom = async () => {
+    if (!workspace || !isHost) return;
+    if (!deletePasswordInput.trim()) {
+      alert('방을 삭제하시려면 관리자 비밀번호를 입력해주세요.');
+      return;
+    }
+
+    if (!window.confirm(`🚨 경고: 정말로 [${workspace.name}] 방을 영구 삭제하시겠습니까?\n\n등록된 모든 학생 명단과 배정 결과가 완전히 삭제되며 되돌릴 수 없습니다!`)) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await deleteWorkspace(workspace.code, deletePasswordInput);
+      localStorage.removeItem(`classdivide_host_${workspace.code}`);
+      localStorage.removeItem('classdivide_last_room');
+      setCurrentCode('');
+      setWorkspace(null);
+      setShowSettingsModal(false);
+      alert('🗑️ 협업 방이 성공적으로 삭제되었습니다.');
+    } catch (err: any) {
+      alert('방 삭제 실패: ' + (err.message || ''));
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -735,9 +813,18 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
 
         <div className="flex items-center gap-3">
           {isHost ? (
-            <span className="bg-amber-50 border border-amber-200 text-amber-800 text-xs font-black px-3 py-1.5 rounded-xl flex items-center gap-1.5 shadow-2xs">
-              <Crown size={14} className="text-amber-500" /> 학년부장 (관리자 권한)
-            </span>
+            <>
+              <span className="bg-amber-50 border border-amber-200 text-amber-800 text-xs font-black px-3 py-1.5 rounded-xl flex items-center gap-1.5 shadow-2xs">
+                <Crown size={14} className="text-amber-500" /> 학년부장 (관리자)
+              </span>
+              <button
+                onClick={handleOpenSettingsModal}
+                className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition cursor-pointer border border-slate-200"
+                title="학급 수 변경, 학년명 수정 및 방 관리"
+              >
+                <Settings size={13} /> 학년 설정 수정
+              </button>
+            </>
           ) : (
             <button
               onClick={() => setShowAdminAuthModal(true)}
@@ -756,6 +843,162 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
           </button>
         </div>
       </div>
+
+      {/* ⚙️ 학년 설정 수정 및 방 삭제 모달 (관리자 전용) */}
+      {showSettingsModal && workspace && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-5">
+              <div className="flex items-center gap-2 text-slate-800 font-black text-base">
+                <Settings size={18} className="text-indigo-600" />
+                <span>학년 설정 수정 & 방 관리</span>
+              </div>
+              <button
+                onClick={() => setShowSettingsModal(false)}
+                className="text-slate-400 hover:text-slate-600 text-xs font-bold cursor-pointer"
+              >
+                닫기
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveSettings} className="space-y-4 text-xs">
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">학교 및 학년 명칭</label>
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full px-3.5 py-2.5 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">현재 학급 수</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={editCurrentClasses}
+                    onChange={(e) => setEditCurrentClasses(Number(e.target.value))}
+                    className="w-full px-3.5 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                    required
+                  />
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">변경 시 탭 개수가 즉시 갱신됩니다.</span>
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">편성할 학급 수 (새 학급)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={editNextClasses}
+                    onChange={(e) => setEditNextClasses(Number(e.target.value))}
+                    className="w-full px-3.5 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                    required
+                  />
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">새 학년 배정 반 수</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">통합(특수)학급 정원 감축 수</label>
+                <select
+                  value={editReduction}
+                  onChange={(e) => setEditReduction(Number(e.target.value))}
+                  className="w-full px-3.5 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-white"
+                >
+                  <option value={1}>특수학생 1인당 1명 감축 (-1)</option>
+                  <option value={2}>특수학생 1인당 2명 감축 (-2, 기본)</option>
+                  <option value={0}>정원 감축 없음 (0명)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">
+                  관리자 비밀번호 변경 (변경할 경우에만 입력)
+                </label>
+                <input
+                  type="password"
+                  placeholder="변경하지 않으려면 비워두세요"
+                  value={editAdminPassword}
+                  onChange={(e) => setEditAdminPassword(e.target.value)}
+                  className="w-full px-3.5 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowSettingsModal(false)}
+                  className="flex-1 py-2.5 font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl cursor-pointer"
+                >
+                  취소
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex-1 py-2.5 font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl cursor-pointer shadow-xs"
+                >
+                  {loading ? '저장 중...' : '⚙️ 변경사항 저장'}
+                </button>
+              </div>
+            </form>
+
+            {/* 위험 구역: 방 영구 삭제 */}
+            <div className="mt-8 pt-5 border-t border-rose-100 bg-rose-50/40 -mx-6 -mb-6 p-6 rounded-b-3xl">
+              <div className="flex items-center gap-1.5 text-rose-700 font-bold text-xs mb-1">
+                <AlertOctagon size={16} />
+                <span>위험 구역: 협업 방 영구 삭제</span>
+              </div>
+              <p className="text-[11px] text-rose-600 mb-3 leading-relaxed">
+                모든 배정 작업이 끝나 더 이상 방이 필요 없거나 잘못 개설된 경우 방을 완전히 삭제합니다.
+              </p>
+
+              {!showDeleteConfirm ? (
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteConfirm(true)}
+                  className="px-4 py-2 bg-white text-rose-600 hover:bg-rose-600 hover:text-white border border-rose-300 rounded-xl text-xs font-black transition cursor-pointer flex items-center gap-1.5 shadow-2xs"
+                >
+                  <Trash2 size={13} /> 방 영구 삭제하기
+                </button>
+              ) : (
+                <div className="space-y-3 bg-white p-4 rounded-2xl border border-rose-200">
+                  <span className="text-xs font-black text-rose-800 block">
+                    정말 삭제하시겠습니까? 확인을 위해 관리자 비밀번호를 입력해주세요:
+                  </span>
+                  <input
+                    type="password"
+                    placeholder="관리자 비밀번호 입력"
+                    value={deletePasswordInput}
+                    onChange={(e) => setDeletePasswordInput(e.target.value)}
+                    className="w-full px-3 py-2 text-xs border border-rose-300 rounded-xl focus:ring-2 focus:ring-rose-500 focus:outline-none"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => { setShowDeleteConfirm(false); setDeletePasswordInput(''); }}
+                      className="flex-1 py-1.5 text-xs font-bold text-slate-500 bg-slate-100 rounded-xl cursor-pointer"
+                    >
+                      취소
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDeleteRoom}
+                      disabled={loading || !deletePasswordInput.trim()}
+                      className="flex-1 py-1.5 text-xs font-black text-white bg-rose-600 hover:bg-rose-700 rounded-xl cursor-pointer shadow-xs"
+                    >
+                      {loading ? '삭제 중...' : '확인, 방 완전히 삭제'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 관리자 인증 모달 */}
       {showAdminAuthModal && (

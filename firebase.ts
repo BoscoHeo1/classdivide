@@ -1,4 +1,4 @@
-﻿import { initializeApp } from "firebase/app";
+import { initializeApp } from "firebase/app";
 import { getDatabase, ref, set, get, update, onValue, off } from "firebase/database";
 import { GradeWorkspace, Student, PlacementResult, ClassSettings } from "./types";
 
@@ -191,4 +191,74 @@ export const resetWorkspaceToInput = async (
     result: null,
     updatedAt: Date.now()
   });
+};
+
+// 8. 방 설정 수정 (관리자 전용)
+export const updateWorkspaceSettings = async (
+  rawCode: string,
+  inputPassword: string,
+  newSettings: {
+    name?: string;
+    currentClassCount?: number;
+    nextClassCount?: number;
+    reductionCount?: number;
+    placementOrder?: 'zigzag' | 'linear';
+    newPassword?: string;
+  }
+) => {
+  const code = sanitizeCode(rawCode);
+  const roomRef = ref(rtdb, `classdivide_workspaces/${code}`);
+  const snapshot = await get(roomRef);
+  if (!snapshot.exists()) throw new Error("존재하지 않는 방입니다.");
+
+  const ws = snapshot.val() as GradeWorkspace;
+  if (ws.password !== inputPassword.trim()) {
+    throw new Error("관리자 비밀번호가 올바르지 않습니다.");
+  }
+
+  const updates: any = {
+    updatedAt: Date.now()
+  };
+
+  if (newSettings.name) updates.name = newSettings.name.trim();
+  if (newSettings.reductionCount !== undefined) updates.reductionCount = newSettings.reductionCount;
+  if (newSettings.placementOrder) updates.placementOrder = newSettings.placementOrder;
+  if (newSettings.newPassword && newSettings.newPassword.trim()) {
+    updates.password = newSettings.newPassword.trim();
+  }
+
+  if (newSettings.nextClassCount !== undefined) {
+    updates.nextClassCount = newSettings.nextClassCount;
+  }
+
+  if (newSettings.currentClassCount !== undefined && newSettings.currentClassCount !== ws.currentClassCount) {
+    updates.currentClassCount = newSettings.currentClassCount;
+    const classStatus = ws.classStatus || {};
+    for (let c = 1; c <= newSettings.currentClassCount; c++) {
+      if (!classStatus[c]) {
+        classStatus[c] = { completed: false };
+      }
+    }
+    updates.classStatus = classStatus;
+  }
+
+  await update(roomRef, updates);
+};
+
+// 9. 방 완전 영구 삭제 (관리자 전용)
+export const deleteWorkspace = async (
+  rawCode: string,
+  inputPassword: string
+) => {
+  const code = sanitizeCode(rawCode);
+  const roomRef = ref(rtdb, `classdivide_workspaces/${code}`);
+  const snapshot = await get(roomRef);
+  if (!snapshot.exists()) throw new Error("존재하지 않는 방입니다.");
+
+  const ws = snapshot.val() as GradeWorkspace;
+  if (ws.password !== inputPassword.trim()) {
+    throw new Error("관리자 비밀번호가 올바르지 않습니다.");
+  }
+
+  await set(roomRef, null);
 };
