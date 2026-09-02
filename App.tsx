@@ -5,8 +5,15 @@ import { parseExcel, generateTemplate, generateSampleData, downloadResultsByNewC
 import { runPlacementAlgorithm } from './utils/algorithm';
 import ClassTable from './components/ClassTable';
 import { DynamicWizard } from './components/DynamicWizard';
+import { CollaborativeWorkspace } from './components/CollaborativeWorkspace';
 
 const App: React.FC = () => {
+  // 최상위 모드: 단독 모드 (기존) vs 동학년 실시간 협업 모드 (신규)
+  const [mainMode, setMainMode] = useState<'standalone' | 'collab'>(() => {
+    const p = new URLSearchParams(window.location.search);
+    return p.get('room') ? 'collab' : 'standalone';
+  });
+
   // State
   const [mode, setMode] = useState<'standard' | 'dynamic'>('standard');
   const [step, setStep] = useState<number>(1);
@@ -211,36 +218,68 @@ const App: React.FC = () => {
       </header>
 
       {/* Main Content */}
-      <main className="max-w-6xl mx-auto px-4 -mt-16">
+      <main className="max-w-7xl mx-auto px-4 -mt-16">
 
-        {/* Mode Selector Toggle */}
-        <div className="max-w-3xl mx-auto mb-6 bg-white/80 backdrop-blur shadow p-1 rounded-xl flex gap-1 border border-indigo-100">
+        {/* 🌟 최상위 운영 모드 토글: 단독 모드 vs 동학년 실시간 협업 모드 */}
+        <div className="max-w-md mx-auto mb-6 bg-white/95 backdrop-blur-md shadow-lg p-1.5 rounded-2xl flex gap-1.5 border border-indigo-200">
           <button
-            onClick={() => setMode('standard')}
-            className={`flex-1 py-3 text-sm font-bold rounded-lg flex items-center justify-center transition-all ${
-              mode === 'standard'
-                ? 'bg-indigo-600 text-white shadow'
-                : 'text-gray-600 hover:text-indigo-600 hover:bg-indigo-50'
+            onClick={() => setMainMode('standalone')}
+            className={`flex-1 py-2.5 text-xs font-black rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+              mainMode === 'standalone'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-slate-600 hover:text-indigo-600 hover:bg-indigo-50/50'
             }`}
           >
-            <Layers className="w-4 h-4 mr-2" />
-            표준 템플릿 편성 모드
+            <FileSpreadsheet className="w-4 h-4" />
+            <span>💻 단독 모드 (엑셀 일괄)</span>
           </button>
           <button
-            onClick={() => setMode('dynamic')}
-            className={`flex-1 py-3 text-sm font-bold rounded-lg flex items-center justify-center transition-all ${
-              mode === 'dynamic'
-                ? 'bg-indigo-600 text-white shadow'
-                : 'text-gray-600 hover:text-indigo-600 hover:bg-indigo-50'
+            onClick={() => setMainMode('collab')}
+            className={`flex-1 py-2.5 text-xs font-black rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+              mainMode === 'collab'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-slate-600 hover:text-indigo-600 hover:bg-indigo-50/50'
             }`}
           >
-            <Sliders className="w-4 h-4 mr-2" />
-            자율 기준 동적 편성 모드 (데모)
+            <Users className="w-4 h-4" />
+            <span>🤝 동학년 실시간 협업</span>
           </button>
         </div>
 
-        {mode === 'standard' ? (
+        {mainMode === 'collab' ? (
+          /* 동학년 실시간 협업 모드 */
+          <CollaborativeWorkspace onBackToStandalone={() => setMainMode('standalone')} />
+        ) : (
+          /* 기존 단독 모드 */
           <>
+            {/* Mode Selector Toggle */}
+            <div className="max-w-3xl mx-auto mb-6 bg-white/80 backdrop-blur shadow p-1 rounded-xl flex gap-1 border border-indigo-100">
+              <button
+                onClick={() => setMode('standard')}
+                className={`flex-1 py-3 text-sm font-bold rounded-lg flex items-center justify-center transition-all ${
+                  mode === 'standard'
+                    ? 'bg-indigo-600 text-white shadow'
+                    : 'text-gray-600 hover:text-indigo-600 hover:bg-indigo-50'
+                }`}
+              >
+                <Layers className="w-4 h-4 mr-2" />
+                표준 템플릿 편성 모드
+              </button>
+              <button
+                onClick={() => setMode('dynamic')}
+                className={`flex-1 py-3 text-sm font-bold rounded-lg flex items-center justify-center transition-all ${
+                  mode === 'dynamic'
+                    ? 'bg-indigo-600 text-white shadow'
+                    : 'text-gray-600 hover:text-indigo-600 hover:bg-indigo-50'
+                }`}
+              >
+                <Sliders className="w-4 h-4 mr-2" />
+                자율 기준 동적 편성 모드 (데모)
+              </button>
+            </div>
+
+            {mode === 'standard' ? (
+              <>
             {/* Step Indicator */}
         <div className="bg-white rounded-xl shadow-md p-4 mb-8 flex justify-around items-center max-w-3xl mx-auto">
             {[
@@ -944,6 +983,8 @@ const App: React.FC = () => {
           </>
         ) : (
           <DynamicWizard />
+        )}
+          </>
         )}
 
       </main>
