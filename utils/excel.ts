@@ -42,7 +42,17 @@ export const parseExcel = (file: File): Promise<Student[]> => {
             학생선수: checkValue(row['학생선수']),
             통합학급: checkValue(row['통합학급']),
             학부모민원: checkValue(row['학부모민원']),
-            쌍둥이: checkValue(row['쌍둥이']),
+            쌍둥이: (() => {
+              const raw = row['쌍둥이'] ? String(row['쌍둥이']).trim() : '';
+              return checkValue(row['쌍둥이']) || raw.includes('동일') || raw.includes('같은') || raw.includes('분리') || raw.includes('다른');
+            })(),
+            쌍둥이옵션: (() => {
+              const raw = row['쌍둥이'] ? String(row['쌍둥이']).trim() : '';
+              const isTwin = checkValue(row['쌍둥이']) || raw.includes('동일') || raw.includes('같은') || raw.includes('분리') || raw.includes('다른');
+              if (!isTwin) return undefined;
+              if (raw.includes('동일') || raw.includes('같은')) return '동일';
+              return '분리'; // 기본값은 분리
+            })(),
             전출예정: checkValue(row['전출예정']),
             분리배정: row['분리배정'] || row['분리요청'] || row['분리요청학생'] || ''
           };
@@ -76,7 +86,7 @@ export const generateTemplate = () => {
     { wch: 6 }, { wch: 4 }, { wch: 6 }, { wch: 10 }, { wch: 6 }, { wch: 12 }, 
     { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 8 }, { wch: 10 }, { wch: 20 }
   ];
-  XLSX.utils.sheet_add_aoa(ws, [['※ 성별: 남성/여성, 특이사항: O, 생활지도: 상/중/하, 분리요청학생: [반 이름] (예: 1반 김철수)']], { origin: 'A3' });
+  XLSX.utils.sheet_add_aoa(ws, [['※ 성별: 남성/여성, 특이사항: O, 생활지도: 상/중/하, 쌍둥이: 분리/동일(같은반), 분리요청학생: [반 이름] (예: 1반 김철수)']], { origin: 'A3' });
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, '학생명단');
   XLSX.writeFile(wb, '학급편성_입력템플릿.xlsx');
@@ -84,22 +94,57 @@ export const generateTemplate = () => {
 
 export const generateSampleData = () => {
   const sampleData: any[] = [];
-  const surnames = ['김', '이', '박', '최', '정', '강', '조', '윤', '장', '임'];
-  const maleNames = ['민준', '서준', '예준', '도윤', '시우', '주원', '하준', '지호', '준서', '준우'];
-  const femaleNames = ['서연', '서윤', '지우', '서현', '민서', '하은', '하윤', '윤서', '지유', '채원'];
+  const surnames = [
+    '김', '이', '박', '최', '정', '강', '조', '윤', '장', '임',
+    '한', '오', '서', '신', '권', '황', '안', '송', '류', '홍',
+    '고', '문', '양', '손', '배', '조', '백', '허', '유', '남',
+    '심', '노', '하', '곽', '성', '차', '주', '우', '구', '신'
+  ];
+  const maleNames = [
+    '민준', '서준', '예준', '도윤', '시우', '주원', '하준', '지호', '준서', '준우',
+    '건우', '우진', '선우', '연우', '유준', '정우', '승우', '승현', '시윤', '준혁',
+    '은우', '현우', '지후', '진우', '민재', '서진', '태윤', '도현', '하민', '성현',
+    '재원', '찬우', '동현', '재현', '민규', '지원', '태양', '민혁', '수현', '현서',
+    '도하', '시헌', '태민', '강민', '유찬', '지환', '로운', '이준', '준영', '현준'
+  ];
+  const femaleNames = [
+    '서연', '서윤', '지우', '서현', '민서', '하은', '하윤', '윤서', '지유', '채원',
+    '지원', '수아', '지아', '서아', '다은', '예은', '소율', '나은', '채은', '아린',
+    '유나', '시은', '소은', '유진', '예원', '수빈', '하율', '윤아', '다윤', '지민',
+    '채린', '은서', '가은', '서하', '민아', '린아', '서영', '혜원', '수민', '나윤',
+    '예린', '아인', '세아', '하린', '보민', '연서', '채아', '로아', '시하', '예나'
+  ];
   const guidanceLevels = ['', '', '', '', '', '하', '하', '중', '중', '상'];
   
+  // 이름 고유성 보장을 위한 집합
+  const usedNames = new Set<string>();
+  const getRandomUniqueName = (gender: '남성' | '여성') => {
+    const list = gender === '남성' ? maleNames : femaleNames;
+    let attempts = 0;
+    while (attempts < 200) {
+      const s = surnames[Math.floor(Math.random() * surnames.length)];
+      const n = list[Math.floor(Math.random() * list.length)];
+      const fullName = s + n;
+      if (!usedNames.has(fullName)) {
+        usedNames.add(fullName);
+        return fullName;
+      }
+      attempts++;
+    }
+    return surnames[Math.floor(Math.random() * surnames.length)] + list[Math.floor(Math.random() * list.length)];
+  };
+
   let studentNum = 1;
 
   for (let classNum = 1; classNum <= 11; classNum++) {
       studentNum = 1;
       for (let i = 0; i < 12; i++) {
-          const birthYear = 2014 + Math.floor(Math.random() * 2);
+          const birthYear = 2014;
           const birthMonth = String(Math.floor(Math.random() * 12) + 1).padStart(2, '0');
           const birthDay = String(Math.floor(Math.random() * 28) + 1).padStart(2, '0');
           sampleData.push({
               '학년': 5, '반': classNum, '번호': studentNum++,
-              '성명': surnames[Math.floor(Math.random() * surnames.length)] + maleNames[Math.floor(Math.random() * maleNames.length)],
+              '성명': getRandomUniqueName('남성'),
               '성별': '남성', '생년월일': `${birthYear}.${birthMonth}.${birthDay}`,
               '학습부진': Math.random() < 0.1 ? 'O' : '', '생활지도': guidanceLevels[Math.floor(Math.random() * guidanceLevels.length)],
               '학생선수': Math.random() < 0.05 ? 'O' : '', '통합학급': Math.random() < 0.03 ? 'O' : '', '학부모민원': Math.random() < 0.05 ? 'O' : '', '쌍둥이': '', '전출예정': Math.random() < 0.02 ? 'O' : '',
@@ -107,12 +152,12 @@ export const generateSampleData = () => {
           });
       }
       for (let i = 0; i < 12; i++) {
-          const birthYear = 2014 + Math.floor(Math.random() * 2);
+          const birthYear = 2014;
           const birthMonth = String(Math.floor(Math.random() * 12) + 1).padStart(2, '0');
           const birthDay = String(Math.floor(Math.random() * 28) + 1).padStart(2, '0');
           sampleData.push({
               '학년': 5, '반': classNum, '번호': studentNum++,
-              '성명': surnames[Math.floor(Math.random() * surnames.length)] + femaleNames[Math.floor(Math.random() * femaleNames.length)],
+              '성명': getRandomUniqueName('여성'),
               '성별': '여성', '생년월일': `${birthYear}.${birthMonth}.${birthDay}`,
               '학습부진': Math.random() < 0.1 ? 'O' : '', '생활지도': guidanceLevels[Math.floor(Math.random() * guidanceLevels.length)],
               '학생선수': Math.random() < 0.05 ? 'O' : '', '통합학급': Math.random() < 0.03 ? 'O' : '', '학부모민원': Math.random() < 0.05 ? 'O' : '', '쌍둥이': '', '전출예정': Math.random() < 0.02 ? 'O' : '',
@@ -121,18 +166,27 @@ export const generateSampleData = () => {
       }
   }
   
-  // Force a duplicate name for testing
+  // 1. 의도된 동명이인 1쌍 생성 (정확히 2명만 동명이인)
   sampleData[0]['성명'] = '김민준'; 
   sampleData[24]['성명'] = '김민준';
   
-  // Force twins (same DOB, marked as Twins)
-  sampleData[5]['쌍둥이'] = 'O';
+  // 2. 쌍둥이 1쌍: 분리 희망 (기본값)
+  sampleData[5]['쌍둥이'] = '분리';
   sampleData[5]['생년월일'] = '2014.05.05';
-  sampleData[6]['쌍둥이'] = 'O';
+  sampleData[5]['성명'] = '박서준';
+  sampleData[6]['쌍둥이'] = '분리';
   sampleData[6]['생년월일'] = '2014.05.05';
-  sampleData[6]['성명'] = sampleData[5]['성명'].substring(0, 1) + '동생'; // similar name
+  sampleData[6]['성명'] = '박서진';
 
-  // Force Separation Request (With Class format)
+  // 3. 쌍둥이 2쌍: 같은 반 희망
+  sampleData[29]['쌍둥이'] = '동일';
+  sampleData[29]['생년월일'] = '2014.11.11';
+  sampleData[29]['성명'] = '이지우';
+  sampleData[30]['쌍둥이'] = '동일';
+  sampleData[30]['생년월일'] = '2014.11.11';
+  sampleData[30]['성명'] = '이지아';
+
+  // 4. 분리요청 학생 (반 이름 형식)
   const targetStudent = sampleData[11];
   sampleData[10]['분리요청학생'] = `${targetStudent['반']}반 ${targetStudent['성명']}`;
 

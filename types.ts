@@ -12,6 +12,7 @@ export interface Student {
   통합학급: boolean;
   학부모민원: boolean;
   쌍둥이: boolean;
+  쌍둥이옵션?: '분리' | '동일';
   전출예정: boolean;
   분리배정?: string; // New field for separation request
   동명이인?: boolean;
@@ -36,6 +37,9 @@ export interface PlacementResult {
     duplicates: number;
     highGuidance: number;
     integrated: number;
+    underachieving?: number;
+    athletes?: number;
+    parentComplaints?: number;
   };
   activeClassNames: string[];
 }

@@ -19,6 +19,11 @@ export const runPlacementAlgorithm = (
   const classAssignments: Record<string, Student[]> = {};
   const hasIntegratedStudent: Record<string, boolean> = {};
   const classHighGuidanceCount: Record<string, number> = {}; 
+  const classMidGuidanceCount: Record<string, number> = {}; // 생활지도 '중' 카운트
+  const classLowGuidanceCount: Record<string, number> = {}; // 생활지도 '하' 카운트
+  const classAcademicSupportCount: Record<string, number> = {}; // 학습부진 카운트
+  const classAthleteCount: Record<string, number> = {}; // 운동부(학생선수) 카운트
+  const classParentComplaintCount: Record<string, number> = {}; // 학부모 민원 카운트
   const classTransferCount: Record<string, number> = {};
   const classOriginCount: Record<string, Record<number, number>> = {}; 
   const classOriginGenderCount: Record<string, Record<string, number>> = {}; 
@@ -27,13 +32,19 @@ export const runPlacementAlgorithm = (
     classAssignments[name] = [];
     hasIntegratedStudent[name] = false;
     classHighGuidanceCount[name] = 0;
+    classMidGuidanceCount[name] = 0;
+    classLowGuidanceCount[name] = 0;
+    classAcademicSupportCount[name] = 0;
+    classAthleteCount[name] = 0;
+    classParentComplaintCount[name] = 0;
     classTransferCount[name] = 0;
     classOriginCount[name] = {};
     classOriginGenderCount[name] = {};
   });
 
-  // --- Build Conflict Map (Separation Logic) ---
+  // --- Build Conflict Map (Separation Logic) & Together Map (Same Class Logic) ---
   const conflictMap = new Map<number, Set<number>>();
+  const togetherMap = new Map<number, Set<number>>();
   
   const addConflict = (id1: number, id2: number) => {
     if (!conflictMap.has(id1)) conflictMap.set(id1, new Set());
@@ -42,7 +53,14 @@ export const runPlacementAlgorithm = (
     conflictMap.get(id2)!.add(id1);
   };
 
-  // 1. Twins Logic
+  const addTogether = (id1: number, id2: number) => {
+    if (!togetherMap.has(id1)) togetherMap.set(id1, new Set());
+    if (!togetherMap.has(id2)) togetherMap.set(id2, new Set());
+    togetherMap.get(id1)!.add(id2);
+    togetherMap.get(id2)!.add(id1);
+  };
+
+  // 1. Twins Logic (분리 vs 같은 반 선택 반영)
   const twinsByDob: Record<string, Student[]> = {};
   students.filter(s => s.쌍둥이).forEach(s => {
     const key = s.생년월일 || 'unknown';
@@ -51,9 +69,18 @@ export const runPlacementAlgorithm = (
   });
   Object.values(twinsByDob).forEach(group => {
     if (group.length > 1) {
+      // 그룹 중 '동일'(같은 반) 희망이 있는지 확인
+      const wantSameClass = group.some(s => s.쌍둥이옵션 === '동일');
+
       for (let i = 0; i < group.length; i++) {
         for (let j = i + 1; j < group.length; j++) {
-          addConflict(group[i].id, group[j].id);
+          if (wantSameClass) {
+            // 같은 반 희망: togetherMap에 등록하여 반드시 동반 배정
+            addTogether(group[i].id, group[j].id);
+          } else {
+            // 분리 희망 (기본값): conflictMap에 등록하여 서로 다른 반 배정
+            addConflict(group[i].id, group[j].id);
+          }
         }
       }
     }
@@ -110,8 +137,20 @@ export const runPlacementAlgorithm = (
 
   const hasConflictInClass = (student: Student, className: string) => {
     const conflicts = conflictMap.get(student.id);
-    if (!conflicts) return false;
-    return classAssignments[className].some(s => conflicts.has(s.id));
+    if (conflicts && classAssignments[className].some(s => conflicts.has(s.id))) {
+      return true;
+    }
+    // 같은 반 희망 파트너(쌍둥이)의 충돌도 함께 검사
+    const partners = togetherMap.get(student.id);
+    if (partners) {
+      for (const partnerId of partners) {
+        const partnerConflicts = conflictMap.get(partnerId);
+        if (partnerConflicts && classAssignments[className].some(s => partnerConflicts.has(s.id))) {
+          return true;
+        }
+      }
+    }
+    return false;
   };
 
   const trackAssignment = (student: Student, className: string) => {
@@ -128,12 +167,31 @@ export const runPlacementAlgorithm = (
     }
     classOriginGenderCount[className][key]++;
 
-    // 3. High Guidance
+    // 3. Guidance (생활지도 상/중/하)
     if (student.생활지도 === '상') {
         classHighGuidanceCount[className]++;
+    } else if (student.생활지도 === '중') {
+        classMidGuidanceCount[className]++;
+    } else if (student.생활지도 === '하') {
+        classLowGuidanceCount[className]++;
     }
 
-    // 4. Transfer
+    // 4. Academic Support (학습부진)
+    if (student.학습부진) {
+        classAcademicSupportCount[className]++;
+    }
+
+    // 5. Athlete (운동부/학생선수)
+    if (student.학생선수) {
+        classAthleteCount[className]++;
+    }
+
+    // 6. Parent Complaint (학부모민원)
+    if (student.학부모민원) {
+        classParentComplaintCount[className]++;
+    }
+
+    // 7. Transfer
     if (student.전출예정) {
         classTransferCount[className]++;
     }
@@ -155,10 +213,22 @@ export const runPlacementAlgorithm = (
   const getSortByKoreanName = (a: Student, b: Student) => a.이름.localeCompare(b.이름, 'ko');
 
   const assignToClass = (student: Student, className: string) => {
+    if (student.배정학급) return; // 이미 배정된 학생 중복 방지
     student.배정학급 = className;
     classAssignments[className].push(student);
     if (student.통합학급) hasIntegratedStudent[className] = true;
     trackAssignment(student, className);
+
+    // 같은 반 희망 쌍둥이 형제/자매 즉시 동일 학급 동반 배정
+    const partners = togetherMap.get(student.id);
+    if (partners) {
+      partners.forEach(partnerId => {
+        const partner = students.find(s => s.id === partnerId);
+        if (partner && !partner.배정학급) {
+          assignToClass(partner, className);
+        }
+      });
+    }
   };
 
   // ** CORE LOGIC FOR EVEN DISTRIBUTION **
@@ -207,18 +277,29 @@ export const runPlacementAlgorithm = (
 
 
   // ==========================================
-  // PHASE 2 & 3: Priorities
+  // PHASE 2 & 3: Priorities (생활지도, 분리, 운동부, 학습부진, 민원)
   // ==========================================
   const priorityStudents = students.filter(s => 
       !s.배정학급 && !s.전출예정 && 
-      (s.생활지도 === '상' || conflictMap.has(s.id) || s.학부모민원 || s.학습부진)
+      (s.생활지도 === '상' || conflictMap.has(s.id) || s.학생선수 || s.학습부진 || s.학부모민원)
   );
 
   priorityStudents.sort((a, b) => {
+      // 1순위: 생활지도 '상'
       if (a.생활지도 === '상' && b.생활지도 !== '상') return -1;
       if (a.생활지도 !== '상' && b.생활지도 === '상') return 1;
+      // 2순위: 충돌(분리배정 요구)
       if (conflictMap.has(a.id) && !conflictMap.has(b.id)) return -1;
       if (!conflictMap.has(a.id) && conflictMap.has(b.id)) return 1;
+      // 3순위: 운동부(학생선수)
+      if (a.학생선수 && !b.학생선수) return -1;
+      if (!a.학생선수 && b.학생선수) return 1;
+      // 4순위: 학습부진
+      if (a.학습부진 && !b.학습부진) return -1;
+      if (!a.학습부진 && b.학습부진) return 1;
+      // 5순위: 학부모 민원
+      if (a.학부모민원 && !b.학부모민원) return -1;
+      if (!a.학부모민원 && b.학부모민원) return 1;
       return getSortByKoreanName(a, b);
   });
 
@@ -238,14 +319,43 @@ export const runPlacementAlgorithm = (
       if (candidates.length === 0) candidates = activeClassNames; 
 
       candidates.sort((a, b) => {
+          // 1. 생활지도 '상' 최소 학급 우선 (특수/통합학급 학생 배정반은 +2 가중치로 일반반 우선 배정)
           if (student.생활지도 === '상') {
-              if (classHighGuidanceCount[a] !== classHighGuidanceCount[b]) {
-                  return classHighGuidanceCount[a] - classHighGuidanceCount[b];
+              const penaltyA = hasIntegratedStudent[a] ? 2 : 0;
+              const penaltyB = hasIntegratedStudent[b] ? 2 : 0;
+              const effectiveA = classHighGuidanceCount[a] + penaltyA;
+              const effectiveB = classHighGuidanceCount[b] + penaltyB;
+              if (effectiveA !== effectiveB) {
+                  return effectiveA - effectiveB;
               }
           }
+          // 2. 운동부(학생선수) 최소 학급 우선
+          if (student.학생선수) {
+              if (classAthleteCount[a] !== classAthleteCount[b]) {
+                  return classAthleteCount[a] - classAthleteCount[b];
+              }
+          }
+          // 3. 학습부진 최소 학급 우선
+          if (student.학습부진) {
+              if (classAcademicSupportCount[a] !== classAcademicSupportCount[b]) {
+                  return classAcademicSupportCount[a] - classAcademicSupportCount[b];
+              }
+          }
+          // 4. 학부모 민원 최소 학급 우선
+          if (student.학부모민원) {
+              if (classParentComplaintCount[a] !== classParentComplaintCount[b]) {
+                  return classParentComplaintCount[a] - classParentComplaintCount[b];
+              }
+          }
+          // 5. 전체 인원(가상 부하) 균형
           const loadA = getVirtualLoad(a);
           const loadB = getVirtualLoad(b);
           if (loadA !== loadB) return loadA - loadB;
+
+          // 6. 성별 균형
+          const genderA = getGenderCount(a, student.성별);
+          const genderB = getGenderCount(b, student.성별);
+          if (genderA !== genderB) return genderA - genderB;
 
           return 0;
       });
@@ -288,7 +398,6 @@ export const runPlacementAlgorithm = (
             if (loadA !== loadB) return loadA - loadB;
 
             // Priority 2: Origin Pairing (Require 1 M and 1 F from same origin)
-            // Goal: If class 'a' has opposite gender from same origin but NO same gender, prioritize it to complete the pair.
             const origin = student.현학급;
             const oppGender = student.성별 === '남성' ? '여성' : '남성';
             
@@ -298,10 +407,6 @@ export const runPlacementAlgorithm = (
             const hasSameA = classAssignments[a].some(s => s.현학급 === origin && s.성별 === student.성별);
             const hasSameB = classAssignments[b].some(s => s.현학급 === origin && s.성별 === student.성별);
 
-            // Score: 
-            // 2 = Has Opposite AND Not Same (Completes Pair)
-            // 1 = Not Same (Fresh Slot)
-            // 0 = Has Same (Stacking)
             const scoreA = (hasOppA && !hasSameA) ? 2 : (!hasSameA ? 1 : 0);
             const scoreB = (hasOppB && !hasSameB) ? 2 : (!hasSameB ? 1 : 0);
             
@@ -312,7 +417,18 @@ export const runPlacementAlgorithm = (
             const genderB = getGenderCount(b, student.성별);
             if (genderA !== genderB) return genderA - genderB;
 
-            // Priority 4: Rotation (Distance from Start Index)
+            // Priority 4: 생활지도 '중' 및 '하' 균등 분산
+            if (student.생활지도 === '중') {
+                const midA = classMidGuidanceCount[a] || 0;
+                const midB = classMidGuidanceCount[b] || 0;
+                if (midA !== midB) return midA - midB;
+            } else if (student.생활지도 === '하') {
+                const lowA = classLowGuidanceCount[a] || 0;
+                const lowB = classLowGuidanceCount[b] || 0;
+                if (lowA !== lowB) return lowA - lowB;
+            }
+
+            // Priority 5: Rotation (Distance from Start Index)
             const indexA = activeClassNames.indexOf(a);
             const indexB = activeClassNames.indexOf(b);
             const distA = (indexA - startIndex + nextClassCount) % nextClassCount;
@@ -394,7 +510,10 @@ export const runPlacementAlgorithm = (
         totalFemale: finalResult.filter(s => s.성별 === '여성').length,
         duplicates: finalResult.filter(s => s.동명이인).length,
         highGuidance: finalResult.filter(s => s.생활지도 === '상').length,
-        integrated: finalResult.filter(s => s.통합학급).length
+        integrated: finalResult.filter(s => s.통합학급).length,
+        underachieving: finalResult.filter(s => s.학습부진).length,
+        athletes: finalResult.filter(s => s.학생선수).length,
+        parentComplaints: finalResult.filter(s => s.학부모민원).length
     }
   };
 };
