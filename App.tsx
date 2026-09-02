@@ -1,11 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, Download, Settings, Users, ArrowRight, CheckCircle, AlertTriangle, FileSpreadsheet, RefreshCw, Layers, Sliders, ShieldCheck } from 'lucide-react';
+import { Upload, Download, Settings, Users, ArrowRight, CheckCircle, AlertTriangle, FileSpreadsheet, RefreshCw, Layers, Sliders, ShieldCheck, BookOpen } from 'lucide-react';
 import { Student, ClassSettings, PlacementResult } from './types';
 import { parseExcel, generateTemplate, generateSampleData, downloadResultsByNewClass, downloadResultsByOldClass } from './utils/excel';
 import { runPlacementAlgorithm } from './utils/algorithm';
 import ClassTable from './components/ClassTable';
 import { DynamicWizard } from './components/DynamicWizard';
 import { CollaborativeWorkspace } from './components/CollaborativeWorkspace';
+import { ManualModal } from './components/ManualModal';
 
 const App: React.FC = () => {
   // 최상위 모드: 단독 모드 (기존) vs 동학년 실시간 협업 모드 (신규)
@@ -13,6 +14,9 @@ const App: React.FC = () => {
     const p = new URLSearchParams(window.location.search);
     return p.get('room') ? 'collab' : 'standalone';
   });
+
+  // 사용설명서 모달 상태
+  const [showManualModal, setShowManualModal] = useState<boolean>(false);
 
   // State
   const [mode, setMode] = useState<'standard' | 'dynamic'>('standard');
@@ -210,9 +214,19 @@ const App: React.FC = () => {
                 복잡한 학생 배정, 이제 클릭 한 번으로 끝내세요.<br/>
                 성별, 성적, 생활지도 등 모든 조건을 고려하여 최적의 학급을 편성합니다.
             </p>
-            <div className="inline-flex items-center gap-2 mt-4 px-4 py-1.5 bg-indigo-500/30 border border-indigo-400/30 rounded-full text-xs text-indigo-100 backdrop-blur-sm">
-                <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>개인정보 안심: 모든 데이터는 브라우저 내부(로컬)에서만 연산되며 절대 외부에 전송되지 않습니다.</span>
+            <div className="flex flex-wrap items-center justify-center gap-3 mt-5">
+                <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-indigo-500/30 border border-indigo-400/30 rounded-full text-xs text-indigo-100 backdrop-blur-sm">
+                    <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>개인정보 안심: 100% 브라우저 메모리 연산 (서버 전송 없음)</span>
+                </div>
+                <button
+                    type="button"
+                    onClick={() => setShowManualModal(true)}
+                    className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-white text-indigo-700 hover:bg-indigo-50 rounded-full text-xs font-black shadow-md transition cursor-pointer"
+                >
+                    <BookOpen className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>📖 교사용 사용설명서</span>
+                </button>
             </div>
         </div>
       </header>
@@ -997,6 +1011,12 @@ const App: React.FC = () => {
             <button onClick={() => setError(null)} className="ml-4 font-bold hover:opacity-75">✕</button>
         </div>
       )}
+
+      {/* 📖 교사용 사용설명서 모달 */}
+      <ManualModal
+        isOpen={showManualModal}
+        onClose={() => setShowManualModal(false)}
+      />
 
     </div>
   );
