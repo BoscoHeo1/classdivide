@@ -212,6 +212,33 @@ export const runPlacementAlgorithm = (
 
   const getSortByKoreanName = (a: Student, b: Student) => a.이름.localeCompare(b.이름, 'ko');
 
+  // 생년월일 정규화 헬퍼 (YYYYMMDD 8자리 표준 문자열 변환)
+  const normalizeBirthDate = (dob?: string): string => {
+    if (!dob) return '99999999'; // 생년월일 미기재 시 후순위 배치
+    const cleaned = String(dob).replace(/[^0-9]/g, '');
+    if (cleaned.length === 8) return cleaned; // 예: 20130512
+    if (cleaned.length === 6) {
+      // 6자리(예: 130512)인 경우 학생 연령대 기준 2000년대/1900년대 접두어 처리
+      const yearPrefix = parseInt(cleaned.slice(0, 2), 10) < 50 ? '20' : '19';
+      return `${yearPrefix}${cleaned}`;
+    }
+    return cleaned.padEnd(8, '0');
+  };
+
+  // 생년월일 빠른 순(오름차순: 1월 1일생 -> 12월 31일생) 정렬 함수
+  const getSortByBirthDate = (a: Student, b: Student): number => {
+    const dateA = normalizeBirthDate(a.생년월일);
+    const dateB = normalizeBirthDate(b.생년월일);
+    if (dateA !== dateB) {
+      return dateA.localeCompare(dateB);
+    }
+    // 생년월일이 동일한 경우 기존 출석번호 순 -> 이름 가나다 순으로 안정적 정렬 유지
+    const numA = Number(a.번호) || 0;
+    const numB = Number(b.번호) || 0;
+    if (numA !== numB) return numA - numB;
+    return a.이름.localeCompare(b.이름, 'ko');
+  };
+
   const assignToClass = (student: Student, className: string) => {
     if (student.배정학급) return; // 이미 배정된 학생 중복 방지
     student.배정학급 = className;
@@ -445,22 +472,26 @@ export const runPlacementAlgorithm = (
       if (!studentsByClass[c]) continue;
       
       const classStudents = studentsByClass[c];
-      const males = classStudents.filter(s => s.성별 === '남성');
-      const females = classStudents.filter(s => s.성별 === '여성');
+      // 각 학급의 남학생과 여학생을 생년월일 빠른 순(오름차순)으로 정렬
+      const males = classStudents.filter(s => s.성별 === '남성').sort(getSortByBirthDate);
+      const females = classStudents.filter(s => s.성별 === '여성').sort(getSortByBirthDate);
 
-      // Male Start: (c - 1) % N
+      // Male Start: (c - 1) % N (생년월일 빠른 순으로 순환 배정)
       const maleStartIndex = (c - 1) % nextClassCount;
       assignGroup(males, maleStartIndex);
 
-      // Female Start: c % N
+      // Female Start: c % N (생년월일 빠른 순으로 순환 배정)
       const femaleStartIndex = c % nextClassCount;
       assignGroup(females, femaleStartIndex);
   }
 
-  // Handle remaining students (Edge Case)
+  // Handle remaining students (Edge Case: 미배정 잔여 학생도 성별/생년월일 순 정렬 배정)
   const remainingStudents = generalStudents.filter(s => !s.배정학급);
   if (remainingStudents.length > 0) {
-      assignGroup(remainingStudents, 0);
+      const remainingMales = remainingStudents.filter(s => s.성별 === '남성').sort(getSortByBirthDate);
+      const remainingFemales = remainingStudents.filter(s => s.성별 === '여성').sort(getSortByBirthDate);
+      assignGroup(remainingMales, 0);
+      assignGroup(remainingFemales, 0);
   }
 
 
