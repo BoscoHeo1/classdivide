@@ -1,264 +1,202 @@
 import { initializeApp } from "firebase/app";
-import { getDatabase, ref, set, get, update, onValue, off } from "firebase/database";
+import { getAuth, signInAnonymously } from "firebase/auth";
+import { getFunctions, httpsCallable } from "firebase/functions";
+import { getDatabase, ref, set, get, update, onValue, serverTimestamp } from "firebase/database";
 import { GradeWorkspace, Student, PlacementResult, ClassSettings } from "./types";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyBHGRJvSZ1JFI-sq1lsN-APIyIMr8c5aeI",
-  authDomain: "gogo-forward.firebaseapp.com",
-  databaseURL: "https://gogo-forward-default-rtdb.firebaseio.com",
-  projectId: "gogo-forward",
-  storageBucket: "gogo-forward.firebasestorage.app",
-  messagingSenderId: "859594059934",
-  appId: "1:859594059934:web:309906a4128638b9f24b8f"
+  apiKey: "AIzaSyCJNtARfZj7lndDBR6UUTAJzwClOCndclY",
+  authDomain: "class-divide.firebaseapp.com",
+  databaseURL: "https://class-divide-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "class-divide",
+  storageBucket: "class-divide.firebasestorage.app",
+  messagingSenderId: "992756245827",
+  appId: "1:992756245827:web:a62631fdeeb1acee5ffbf6"
 };
-
 const app = initializeApp(firebaseConfig, "classdivide-collab");
 export const rtdb = getDatabase(app);
+const auth = getAuth(app);
+const recoveryFunctions = getFunctions(app, "asia-southeast1");
+export interface AdminRecoveryCode { roomCode: string; recoveryCode: string; version: number; }
+export type CollaborationWorkspace = Omit<GradeWorkspace, 'password'>;
+export interface RoomMember { role: 'admin' | 'teacher'; active: boolean; classNum: number; }
+export interface JoinRequest { classNum: number; teacherName: string; requestedAt: number; }
+let authentication: Promise<string> | undefined;
 
-const sanitizeCode = (code: string) => code.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, "");
+// Called by collaboration only. Firebase persistence, not a localStorage flag, identifies users.
+export const ensureAnonymousUser = (): Promise<string> => {
+  if (!authentication) {
+    authentication = (async () => {
+      await auth.authStateReady();
+      return (auth.currentUser || (await signInAnonymously(auth)).user).uid;
+    })().finally(() => { authentication = undefined; });
+  }
+  return authentication;
+};
+const sanitizeCode = (code: string) => {
+  const value = code.trim().toUpperCase();
+  if (!/^[A-Z0-9_-]{1,40}$/.test(value)) throw new Error('방 코드는 영문·숫자·밑줄·하이픈 1~40자로 입력해주세요.');
+  return value;
+};
+// Preserve optional-field omission for inputs AND nested placement results.
+const normalize = (value: any): any => {
+  if (Array.isArray(value)) return value.map(item => item === undefined ? null : normalize(item));
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)
+      .map(([key, item]) => [key, normalize(item)]));
+  }
+  return value;
+};
+const memberPath = (code: string, uid: string) => `roomMembers/${code}/${uid}`;
+export const getOwnMembership = async (rawCode: string): Promise<RoomMember | null> => {
+  const uid = await ensureAnonymousUser();
+  return (await get(ref(rtdb, memberPath(sanitizeCode(rawCode), uid)))).val();
+};
+export const subscribeOwnMembership = (rawCode: string, uid: string,
+  onUpdate: (member: RoomMember | null) => void, onError: (error: Error) => void) =>
+  onValue(ref(rtdb, memberPath(sanitizeCode(rawCode), uid)), snapshot => onUpdate(snapshot.val()), onError);
+const requireMember = async (rawCode: string, admin = false) => {
+  const member = await getOwnMembership(rawCode);
+  if (!member?.active || (admin && member.role !== 'admin')) throw new Error('이 방의 승인된 권한이 필요합니다.');
+  return member;
+};
 
-// 1. 방 개설 (호스트)
-export const createWorkspace = async (
-  rawCode: string,
-  name: string,
-  password: string,
-  settings: ClassSettings,
-  hostId: string
-): Promise<string> => {
+// Bootstrap is allowed by Rules only for the immutable host UID of a new room.
+export const restoreCreatorMembership = async (rawCode: string) => {
   const code = sanitizeCode(rawCode);
-  if (!code) throw new Error("방 코드를 입력해주세요.");
-  if (!name.trim()) throw new Error("학교/학년명을 입력해주세요.");
-  if (!password.trim()) throw new Error("관리자 실행 비밀번호를 설정해주세요.");
-
-  const roomRef = ref(rtdb, `classdivide_workspaces/${code}`);
-  const snapshot = await get(roomRef);
-  if (snapshot.exists()) {
-    throw new Error(`이미 존재하는 방 코드(${code})입니다. 다른 코드를 사용해주세요.`);
-  }
-
-  const newWorkspace: GradeWorkspace = {
-    code,
-    name: name.trim(),
-    password: password.trim(),
-    currentClassCount: settings.currentClassCount,
-    nextClassCount: settings.nextClassCount,
-    reductionCount: settings.reductionCount,
-    placementOrder: settings.placementOrder,
-    students: [],
-    classStatus: {},
-    step: 1,
-    hostId,
-    updatedAt: Date.now()
-  };
-
-  // 1반부터 각 반 상태 초기화
-  for (let c = 1; c <= settings.currentClassCount; c++) {
-    newWorkspace.classStatus[c] = { completed: false };
-  }
-
-  await set(roomRef, newWorkspace);
+  const uid = await ensureAnonymousUser();
+  const existing = await getOwnMembership(code);
+  if (existing?.active) return existing;
+  await set(ref(rtdb, memberPath(code, uid)), { role: 'admin', active: true, classNum: 0 });
+  return { role: 'admin', active: true, classNum: 0 } as RoomMember;
+};
+export const createWorkspace = async (rawCode: string, name: string, settings: ClassSettings): Promise<string> => {
+  const code = sanitizeCode(rawCode);
+  const uid = await ensureAnonymousUser();
+  if (!name.trim()) throw new Error('학교/학년명을 입력해주세요.');
+  if (await getOwnMembership(code)) throw new Error('이미 참여한 방 코드입니다. 재입장하거나 다른 코드를 사용해주세요.');
+  const classStatus: CollaborationWorkspace['classStatus'] = {};
+  for (let c = 1; c <= settings.currentClassCount; c++) classStatus[c] = { completed: false };
+  // No preflight workspace read: non-members cannot read even a known code.
+  await set(ref(rtdb, `classdivide_workspaces/${code}`), {
+    code, name: name.trim(), hostId: uid,
+    currentClassCount: settings.currentClassCount, nextClassCount: settings.nextClassCount,
+    reductionCount: settings.reductionCount, placementOrder: settings.placementOrder,
+    classStatus, step: 1, updatedAt: Date.now()
+  });
+  await restoreCreatorMembership(code);
   return code;
 };
-
-// 2. 방 정보 조회 (입장)
-export const getWorkspace = async (rawCode: string): Promise<GradeWorkspace | null> => {
+export const requestRoomMembership = async (rawCode: string, classNum: number, teacherName: string) => {
   const code = sanitizeCode(rawCode);
-  const roomRef = ref(rtdb, `classdivide_workspaces/${code}`);
-  const snapshot = await get(roomRef);
-  if (!snapshot.exists()) return null;
-  return snapshot.val() as GradeWorkspace;
+  const uid = await ensureAnonymousUser();
+  if ((await getOwnMembership(code))?.active) return;
+  const requestRef = ref(rtdb, `roomJoinRequests/${code}/${uid}`);
+  // Own pending request is readable; the room itself is not.
+  if ((await get(requestRef)).exists()) return;
+  await set(requestRef, { classNum, teacherName: teacherName.trim() || `${classNum}반 담임`, requestedAt: serverTimestamp() });
+};
+export const subscribeOwnRequest = (code: string, uid: string, callback: (request: JoinRequest | null) => void,
+  onError: (error: Error) => void) =>
+  onValue(ref(rtdb, `roomJoinRequests/${sanitizeCode(code)}/${uid}`), s => callback(s.val()), onError);
+export const subscribeJoinRequests = (code: string, callback: (requests: Record<string, JoinRequest>) => void,
+  onError: (error: Error) => void) =>
+  onValue(ref(rtdb, `roomJoinRequests/${sanitizeCode(code)}`), s => callback(s.val() || {}), onError);
+export const approveJoinRequest = async (rawCode: string, uid: string, request: JoinRequest) => {
+  const code = sanitizeCode(rawCode);
+  await requireMember(code, true);
+  await update(ref(rtdb), {
+    [memberPath(code, uid)]: { role: 'teacher', active: true, classNum: request.classNum },
+    [`roomJoinRequests/${code}/${uid}`]: null
+  });
+};
+export const cancelJoinRequest = async (rawCode: string, uid?: string) => {
+  const ownUid = await ensureAnonymousUser();
+  await set(ref(rtdb, `roomJoinRequests/${sanitizeCode(rawCode)}/${uid || ownUid}`), null);
 };
 
-// 3. 실시간 동기화 구독
-export const subscribeWorkspace = (
-  rawCode: string,
-  onUpdate: (workspace: GradeWorkspace | null) => void
-) => {
+// Keep the existing flat-array UI/algorithm contract; each class owns a separate DB path.
+const toWorkspace = (data: any): CollaborationWorkspace | null => {
+  if (!data) return null;
+  const students: Student[] = Object.entries(data.classInputs || {}).sort(([a], [b]) => Number(a) - Number(b))
+    .flatMap(([classNum, rows]) => Object.values(rows || {}).filter(Boolean).map((student: any, index) => ({
+      ...student, id: Number(classNum) * 1000000 + index + 1, 현학급: Number(classNum)
+    })));
+  return { ...data, students, classStatus: data.classStatus || {} };
+};
+export const getWorkspace = async (rawCode: string): Promise<CollaborationWorkspace | null> => {
+  await requireMember(rawCode);
+  return toWorkspace((await get(ref(rtdb, `classdivide_workspaces/${sanitizeCode(rawCode)}`))).val());
+};
+export const subscribeWorkspace = (rawCode: string, onUpdate: (workspace: CollaborationWorkspace | null) => void,
+  onError: (error: Error) => void) =>
+  onValue(ref(rtdb, `classdivide_workspaces/${sanitizeCode(rawCode)}`), s => onUpdate(toWorkspace(s.val())), onError);
+
+export const updateClassStudents = async (rawCode: string, classNum: number, newClassStudents: Student[],
+  isCompleted: boolean, teacherName?: string) => {
   const code = sanitizeCode(rawCode);
-  const roomRef = ref(rtdb, `classdivide_workspaces/${code}`);
-  const unsubscribe = onValue(roomRef, (snapshot) => {
-    if (snapshot.exists()) {
-      const data = snapshot.val();
-      // ensure students array
-      if (!data.students) data.students = [];
-      if (!data.classStatus) data.classStatus = {};
-      onUpdate(data as GradeWorkspace);
-    } else {
-      onUpdate(null);
+  const member = await requireMember(code);
+  if (member.role !== 'admin' && member.classNum !== classNum) throw new Error('담당 학급만 수정할 수 있습니다.');
+  if (newClassStudents.length >= 1000000) throw new Error('학급 학생 수가 너무 많습니다.');
+  const path = `classdivide_workspaces/${code}`;
+  const status = (await get(ref(rtdb, `${path}/classStatus/${classNum}`))).val();
+  await update(ref(rtdb), normalize({
+    [`${path}/classInputs/${classNum}`]: newClassStudents.map((student, index) => ({
+      ...student, id: classNum * 1000000 + index + 1, 현학급: classNum
+    })),
+    [`${path}/classStatus/${classNum}`]: {
+      completed: isCompleted, teacherName: teacherName || status?.teacherName || `${classNum}반 담임`, updatedAt: Date.now()
     }
-  });
-
-  return () => off(roomRef, 'value', unsubscribe);
+  }));
 };
-
-// 4. 담임선생님이 자기 반 학생 업데이트
-export const updateClassStudents = async (
-  rawCode: string,
-  classNum: number,
-  newClassStudents: Student[],
-  isCompleted: boolean,
-  teacherName?: string
-) => {
-  const code = sanitizeCode(rawCode);
-  const roomRef = ref(rtdb, `classdivide_workspaces/${code}`);
-  const snapshot = await get(roomRef);
-  if (!snapshot.exists()) throw new Error("존재하지 않는 방입니다.");
-
-  const ws = snapshot.val() as GradeWorkspace;
-  const currentStudents: Student[] = ws.students || [];
-
-  // 기존 학생 목록에서 해당 반 학생만 필터링하고 새 학생 목록으로 교체
-  const otherClassStudents = currentStudents.filter(s => s.현학급 !== classNum);
-  const updatedAllStudents = [...otherClassStudents, ...newClassStudents];
-
-  // ID 재부여 (1부터 고유 식별)
-  updatedAllStudents.forEach((s, idx) => {
-    s.id = idx + 1;
-  });
-
-  const classStatus = ws.classStatus || {};
-  classStatus[classNum] = {
-    completed: isCompleted,
-    teacherName: teacherName || classStatus[classNum]?.teacherName || `${classNum}반 담임`,
-    updatedAt: Date.now()
-  };
-
-  await update(roomRef, {
-    students: updatedAllStudents,
-    classStatus,
-    updatedAt: Date.now()
-  });
+const adminUpdate = async (rawCode: string, changes: object) => {
+  await requireMember(rawCode, true);
+  await update(ref(rtdb, `classdivide_workspaces/${sanitizeCode(rawCode)}`), normalize({ ...changes, updatedAt: Date.now() }));
 };
-
-// 5. 관리자(학년부장)가 최종 학급편성 실행 및 결과 클라우드 저장
-export const executeWorkspacePlacement = async (
-  rawCode: string,
-  inputPassword: string,
-  result: PlacementResult,
-  settings: ClassSettings
-) => {
-  const code = sanitizeCode(rawCode);
-  const roomRef = ref(rtdb, `classdivide_workspaces/${code}`);
-  const snapshot = await get(roomRef);
-  if (!snapshot.exists()) throw new Error("존재하지 않는 방입니다.");
-
-  const ws = snapshot.val() as GradeWorkspace;
-  if (ws.password !== inputPassword.trim()) {
-    throw new Error("관리자 실행 비밀번호가 올바르지 않습니다.");
+export const executeWorkspacePlacement = async (rawCode: string, result: PlacementResult, settings: ClassSettings) =>
+  adminUpdate(rawCode, { step: 3, result, currentClassCount: settings.currentClassCount,
+    nextClassCount: settings.nextClassCount, reductionCount: settings.reductionCount, placementOrder: settings.placementOrder });
+export const updateWorkspaceResult = async (rawCode: string, result: PlacementResult) => adminUpdate(rawCode, { result });
+export const resetWorkspaceToInput = async (rawCode: string) => adminUpdate(rawCode, { step: 1, result: null });
+export const updateWorkspaceSettings = async (rawCode: string, settings: {
+  name?: string; currentClassCount?: number; nextClassCount?: number; reductionCount?: number; placementOrder?: 'zigzag' | 'linear';
+}) => {
+  await requireMember(rawCode, true);
+  const ws = await getWorkspace(rawCode);
+  if (!ws) throw new Error('존재하지 않는 방입니다.');
+  // Do not silently hide already-uploaded classes when reducing the class count.
+  if (settings.currentClassCount !== undefined && ws.students.some(s => s.현학급 > settings.currentClassCount!)) {
+    throw new Error('줄이려는 학급에 학생이 남아 있습니다. 해당 학급 명단을 먼저 정리해주세요.');
   }
-
-  await update(roomRef, {
-    step: 3,
-    result,
-    currentClassCount: settings.currentClassCount,
-    nextClassCount: settings.nextClassCount,
-    reductionCount: settings.reductionCount,
-    placementOrder: settings.placementOrder,
-    updatedAt: Date.now()
-  });
-};
-
-// 6. 결과 수동 변경 동기화 (맞교환 등 관리자 조정 결과 반영)
-export const updateWorkspaceResult = async (
-  rawCode: string,
-  updatedResult: PlacementResult
-) => {
-  const code = sanitizeCode(rawCode);
-  const roomRef = ref(rtdb, `classdivide_workspaces/${code}`);
-  await update(roomRef, {
-    result: updatedResult,
-    updatedAt: Date.now()
-  });
-};
-
-// 7. 배정 초기화 / 재배정 모드로 되돌리기 (관리자 전용)
-export const resetWorkspaceToInput = async (
-  rawCode: string,
-  inputPassword: string
-) => {
-  const code = sanitizeCode(rawCode);
-  const roomRef = ref(rtdb, `classdivide_workspaces/${code}`);
-  const snapshot = await get(roomRef);
-  if (!snapshot.exists()) throw new Error("존재하지 않는 방입니다.");
-
-  const ws = snapshot.val() as GradeWorkspace;
-  if (ws.password !== inputPassword.trim()) {
-    throw new Error("관리자 비밀번호가 올바르지 않습니다.");
-  }
-
-  await update(roomRef, {
-    step: 1,
-    result: null,
-    updatedAt: Date.now()
-  });
-};
-
-// 8. 방 설정 수정 (관리자 전용)
-export const updateWorkspaceSettings = async (
-  rawCode: string,
-  inputPassword: string,
-  newSettings: {
-    name?: string;
-    currentClassCount?: number;
-    nextClassCount?: number;
-    reductionCount?: number;
-    placementOrder?: 'zigzag' | 'linear';
-    newPassword?: string;
-  }
-) => {
-  const code = sanitizeCode(rawCode);
-  const roomRef = ref(rtdb, `classdivide_workspaces/${code}`);
-  const snapshot = await get(roomRef);
-  if (!snapshot.exists()) throw new Error("존재하지 않는 방입니다.");
-
-  const ws = snapshot.val() as GradeWorkspace;
-  if (ws.password !== inputPassword.trim()) {
-    throw new Error("관리자 비밀번호가 올바르지 않습니다.");
-  }
-
-  const updates: any = {
-    updatedAt: Date.now()
-  };
-
-  if (newSettings.name) updates.name = newSettings.name.trim();
-  if (newSettings.reductionCount !== undefined) updates.reductionCount = newSettings.reductionCount;
-  if (newSettings.placementOrder) updates.placementOrder = newSettings.placementOrder;
-  if (newSettings.newPassword && newSettings.newPassword.trim()) {
-    updates.password = newSettings.newPassword.trim();
-  }
-
-  if (newSettings.nextClassCount !== undefined) {
-    updates.nextClassCount = newSettings.nextClassCount;
-  }
-
-  if (newSettings.currentClassCount !== undefined && newSettings.currentClassCount !== ws.currentClassCount) {
-    updates.currentClassCount = newSettings.currentClassCount;
-    const classStatus = ws.classStatus || {};
-    for (let c = 1; c <= newSettings.currentClassCount; c++) {
-      if (!classStatus[c]) {
-        classStatus[c] = { completed: false };
-      }
+  const changes: Record<string, unknown> = { ...settings };
+  if (settings.name !== undefined) changes.name = settings.name.trim();
+  if (settings.currentClassCount !== undefined) {
+    for (let c = 1; c <= settings.currentClassCount; c++) {
+      if (!ws.classStatus[c]) changes[`classStatus/${c}`] = { completed: false };
     }
-    updates.classStatus = classStatus;
+    for (const key of Object.keys(ws.classStatus)) {
+      if (Number(key) > settings.currentClassCount) changes[`classStatus/${key}`] = null;
+    }
   }
-
-  await update(roomRef, updates);
+  await adminUpdate(rawCode, changes);
 };
-
-// 9. 방 완전 영구 삭제 (관리자 전용)
-export const deleteWorkspace = async (
-  rawCode: string,
-  inputPassword: string
-) => {
-  const code = sanitizeCode(rawCode);
-  const roomRef = ref(rtdb, `classdivide_workspaces/${code}`);
-  const snapshot = await get(roomRef);
-  if (!snapshot.exists()) throw new Error("존재하지 않는 방입니다.");
-
-  const ws = snapshot.val() as GradeWorkspace;
-  if (ws.password !== inputPassword.trim()) {
-    throw new Error("관리자 비밀번호가 올바르지 않습니다.");
-  }
-
-  await set(roomRef, null);
+// Recovery plaintext is passed only to callable Functions and returned to in-memory UI state.
+export const issueAdminRecoveryCode = async (rawCode: string, replaceExisting = false): Promise<AdminRecoveryCode> => {
+  await ensureAnonymousUser();
+  const response = await httpsCallable<{ roomCode: string; replaceExisting: boolean }, AdminRecoveryCode>(
+    recoveryFunctions, 'issueAdminRecoveryCode'
+  )({ roomCode: sanitizeCode(rawCode), replaceExisting });
+  return response.data;
+};
+export const recoverWorkspaceAdmin = async (rawCode: string, recoveryCode: string): Promise<AdminRecoveryCode> => {
+  await ensureAnonymousUser();
+  const response = await httpsCallable<{ roomCode: string; recoveryCode: string }, AdminRecoveryCode>(
+    recoveryFunctions, 'recoverWorkspaceAdmin'
+  )({ roomCode: sanitizeCode(rawCode), recoveryCode: recoveryCode.trim() });
+  return response.data;
+};
+export const deleteWorkspace = async (rawCode: string) => {
+  await ensureAnonymousUser();
+  // Server atomically removes room data, memberships, secrets and recovery history.
+  await httpsCallable(recoveryFunctions, 'deleteWorkspaceSecure')({ roomCode: sanitizeCode(rawCode) });
 };

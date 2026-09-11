@@ -46,7 +46,7 @@ export const parseExcel = (file: File): Promise<Student[]> => {
               const raw = row['쌍둥이'] ? String(row['쌍둥이']).trim() : '';
               return checkValue(row['쌍둥이']) || raw.includes('동일') || raw.includes('같은') || raw.includes('분리') || raw.includes('다른');
             })(),
-            쌍둥이옵션: (() => {
+            쌍둥이옵션: ((): Student['쌍둥이옵션'] => {
               const raw = row['쌍둥이'] ? String(row['쌍둥이']).trim() : '';
               const isTwin = checkValue(row['쌍둥이']) || raw.includes('동일') || raw.includes('같은') || raw.includes('분리') || raw.includes('다른');
               if (!isTwin) return undefined;

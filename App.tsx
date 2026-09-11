@@ -97,7 +97,7 @@ const App: React.FC = () => {
   // 수동 배정반 변경 핸들러
   const handleStudentClassChange = (studentId: number, newClassName: string) => {
     if (!result) return;
-    const allStudents: Student[] = Object.values(result.assignments).flat();
+    const allStudents: Student[] = Object.values<Student[]>(result.assignments).flat();
     const target = allStudents.find(s => s.id === studentId);
     if (!target || target.배정학급 === newClassName) return;
 
@@ -150,7 +150,7 @@ const App: React.FC = () => {
       }
 
       // 두 학생의 배정학급 맞바꾸기
-      const allStudents: Student[] = Object.values(result.assignments).flat();
+      const allStudents: Student[] = Object.values<Student[]>(result.assignments).flat();
       const s1 = allStudents.find(s => s.id === swapCandidate.id);
       const s2 = allStudents.find(s => s.id === student.id);
 
@@ -202,29 +202,29 @@ const App: React.FC = () => {
   });
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 pb-20">
+    <div className="min-h-screen bg-[#f4f8ff] text-[#172b4d] pb-10 sm:pb-12">
       
       {/* Header */}
-      <header className="bg-indigo-600 text-white pt-10 pb-24 px-4 shadow-lg">
-        <div className="max-w-6xl mx-auto text-center">
-            <h1 className="text-4xl md:text-5xl font-extrabold mb-4 tracking-tight drop-shadow-sm">
-                🏫 학급 편성 마법사
+      <header className="border-b border-blue-100 bg-white px-4 py-6 sm:px-6 sm:py-8">
+        <div className="max-w-7xl mx-auto text-left">
+            <h1 className="text-2xl sm:text-3xl font-extrabold mb-3 leading-snug tracking-tight text-[#071747]">
+                보스코쌤 · 반편성 프로그램
             </h1>
-            <p className="text-indigo-100 text-lg md:text-xl font-light max-w-2xl mx-auto">
+            <p className="text-sm sm:text-base font-normal leading-7 text-slate-600 max-w-2xl">
                 복잡한 학생 배정, 이제 클릭 한 번으로 끝내세요.<br/>
                 성별, 성적, 생활지도 등 모든 조건을 고려하여 최적의 학급을 편성합니다.
             </p>
-            <div className="flex flex-wrap items-center justify-center gap-3 mt-5">
-                <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-indigo-500/30 border border-indigo-400/30 rounded-full text-xs text-indigo-100 backdrop-blur-sm">
-                    <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span>개인정보 안심: 100% 브라우저 메모리 연산 (서버 전송 없음)</span>
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3 mt-4">
+                <div className="inline-flex items-center gap-2 px-3 py-2 bg-blue-50/70 border border-blue-100 rounded-xl text-xs leading-5 text-slate-600">
+                    <ShieldCheck className="w-4 h-4 text-blue-500 shrink-0" />
+                    <span>단독 모드: 브라우저 메모리 처리 · 협업 모드: 서버 저장·동기화</span>
                 </div>
                 <button
                     type="button"
                     onClick={() => setShowManualModal(true)}
-                    className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-white text-indigo-700 hover:bg-indigo-50 rounded-full text-xs font-black shadow-md transition cursor-pointer"
+                    className="inline-flex items-center gap-2 px-3 py-2 bg-white text-blue-700 hover:bg-blue-50 border border-blue-200 rounded-xl text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 cursor-pointer"
                 >
-                    <BookOpen className="w-3.5 h-3.5 text-indigo-600" />
+                    <BookOpen className="w-4 h-4 text-blue-600" />
                     <span>📖 교사용 사용설명서</span>
                 </button>
             </div>
@@ -232,16 +232,16 @@ const App: React.FC = () => {
       </header>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 -mt-16">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-5 sm:pt-6">
 
         {/* 🌟 최상위 운영 모드 토글: 단독 모드 vs 동학년 실시간 협업 모드 */}
-        <div className="max-w-md mx-auto mb-6 bg-white/95 backdrop-blur-md shadow-lg p-1.5 rounded-2xl flex gap-1.5 border border-indigo-200">
+        <div className="w-full max-w-2xl mb-4 bg-white p-1 rounded-2xl grid grid-cols-1 sm:grid-cols-2 gap-1 border border-blue-100">
           <button
             onClick={() => setMainMode('standalone')}
-            className={`flex-1 py-2.5 text-xs font-black rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+            className={`flex-1 px-3 py-2.5 text-sm font-semibold rounded-xl flex items-center justify-center gap-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 cursor-pointer ${
               mainMode === 'standalone'
-                ? 'bg-indigo-600 text-white shadow-sm'
-                : 'text-slate-600 hover:text-indigo-600 hover:bg-indigo-50/50'
+                ? 'bg-blue-600 text-white'
+                : 'text-[#354c75] hover:text-blue-700 hover:bg-blue-50'
             }`}
           >
             <FileSpreadsheet className="w-4 h-4" />
@@ -249,10 +249,10 @@ const App: React.FC = () => {
           </button>
           <button
             onClick={() => setMainMode('collab')}
-            className={`flex-1 py-2.5 text-xs font-black rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+            className={`flex-1 px-3 py-2.5 text-sm font-semibold rounded-xl flex items-center justify-center gap-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 cursor-pointer ${
               mainMode === 'collab'
-                ? 'bg-indigo-600 text-white shadow-sm'
-                : 'text-slate-600 hover:text-indigo-600 hover:bg-indigo-50/50'
+                ? 'bg-blue-600 text-white'
+                : 'text-[#354c75] hover:text-blue-700 hover:bg-blue-50'
             }`}
           >
             <Users className="w-4 h-4" />
@@ -267,13 +267,13 @@ const App: React.FC = () => {
           /* 기존 단독 모드 */
           <>
             {/* Mode Selector Toggle */}
-            <div className="max-w-3xl mx-auto mb-6 bg-white/80 backdrop-blur shadow p-1 rounded-xl flex gap-1 border border-indigo-100">
+            <div className="max-w-3xl mb-4 bg-blue-50/60 p-1 rounded-xl grid grid-cols-1 sm:grid-cols-2 gap-1 border border-blue-100">
               <button
                 onClick={() => setMode('standard')}
-                className={`flex-1 py-3 text-sm font-bold rounded-lg flex items-center justify-center transition-all ${
+                className={`flex-1 px-3 py-2.5 text-sm font-semibold rounded-lg flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ${
                   mode === 'standard'
-                    ? 'bg-indigo-600 text-white shadow'
-                    : 'text-gray-600 hover:text-indigo-600 hover:bg-indigo-50'
+                    ? 'bg-blue-600 text-white'
+                    : 'text-[#354c75] hover:text-blue-700 hover:bg-white'
                 }`}
               >
                 <Layers className="w-4 h-4 mr-2" />
@@ -281,10 +281,10 @@ const App: React.FC = () => {
               </button>
               <button
                 onClick={() => setMode('dynamic')}
-                className={`flex-1 py-3 text-sm font-bold rounded-lg flex items-center justify-center transition-all ${
+                className={`flex-1 px-3 py-2.5 text-sm font-semibold rounded-lg flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ${
                   mode === 'dynamic'
-                    ? 'bg-indigo-600 text-white shadow'
-                    : 'text-gray-600 hover:text-indigo-600 hover:bg-indigo-50'
+                    ? 'bg-blue-600 text-white'
+                    : 'text-[#354c75] hover:text-blue-700 hover:bg-white'
                 }`}
               >
                 <Sliders className="w-4 h-4 mr-2" />
@@ -295,66 +295,66 @@ const App: React.FC = () => {
             {mode === 'standard' ? (
               <>
             {/* Step Indicator */}
-        <div className="bg-white rounded-xl shadow-md p-4 mb-8 flex justify-around items-center max-w-3xl mx-auto">
+        <div className="bg-white border border-blue-100 rounded-2xl p-3 sm:p-4 mb-5 sm:mb-6 grid grid-cols-3 gap-2 max-w-3xl">
             {[
                 { n: 1, t: '데이터 준비' },
                 { n: 2, t: '설정' },
                 { n: 3, t: '결과 확인' }
             ].map((s, idx) => (
-                <div key={s.n} className={`flex items-center ${step >= s.n ? 'text-indigo-600' : 'text-gray-400'}`}>
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold mr-2 ${step >= s.n ? 'bg-indigo-100' : 'bg-gray-100'}`}>
+                <div key={s.n} className={`flex min-w-0 flex-col sm:flex-row items-center justify-center gap-2 ${step >= s.n ? 'text-blue-700' : 'text-slate-500'}`}>
+                    <div className={`w-8 h-8 shrink-0 rounded-xl flex items-center justify-center text-sm font-bold ${step >= s.n ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'}`}>
                         {s.n}
                     </div>
-                    <span className="font-medium hidden sm:inline">{s.t}</span>
-                    {idx < 2 && <ArrowRight className="w-4 h-4 ml-4 text-gray-300 hidden sm:block" />}
+                    <span className="text-xs sm:text-sm font-semibold text-center">{s.t}</span>
+                    {idx < 2 && <ArrowRight className="w-4 h-4 shrink-0 ml-2 text-blue-200 hidden sm:block" />}
                 </div>
             ))}
         </div>
 
         {/* Step 1: Upload */}
         <div className={`transition-all duration-500 ${step === 1 ? 'opacity-100 translate-x-0' : 'hidden opacity-0 -translate-x-full'}`}>
-            <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
-                <div className="p-8 border-b border-gray-100">
-                    <h2 className="text-2xl font-bold text-gray-800 flex items-center">
-                        <Upload className="w-6 h-6 mr-3 text-indigo-500" /> 
+            <div className="space-y-5">
+                <div className="pt-1 pb-1">
+                    <h2 className="text-xl sm:text-2xl font-extrabold tracking-tight text-[#071747] flex items-center">
+                        <Upload className="w-10 h-10 p-2 mr-3 rounded-xl bg-blue-100 text-blue-600 shrink-0" /> 
                         1단계: 학생 데이터 업로드
                     </h2>
                 </div>
                 
-                <div className="p-8 grid md:grid-cols-2 gap-10">
-                    <div className="space-y-6">
-                        <div className="bg-blue-50 border-l-4 border-blue-500 p-4 rounded-r-lg">
-                            <h3 className="font-bold text-blue-800 flex items-center mb-2">
-                                <AlertTriangle className="w-4 h-4 mr-2" /> 준비사항
+                <div className="grid md:grid-cols-2 gap-4 lg:gap-6 items-stretch">
+                    <div className="min-w-0 flex flex-col justify-between gap-6 rounded-2xl border border-blue-100 bg-white p-5 sm:p-6">
+                        <div className="space-y-3">
+                            <h3 className="text-base font-bold text-[#172b4d] flex items-center">
+                                <AlertTriangle className="w-7 h-7 p-1.5 mr-2 rounded-lg bg-blue-50 text-blue-600" /> 준비사항
                             </h3>
-                            <p className="text-sm text-blue-700 leading-relaxed">
+                            <p className="text-sm text-slate-600 leading-6">
                                 제공된 <strong>엑셀 템플릿</strong>을 다운로드하여 학생 정보를 입력해주세요.<br/>
                                 필수: 이름, 성별, 생년월일, 현학급<br/>
                                 생활지도는 <strong>상/중/하</strong>로 입력합니다.
                             </p>
                         </div>
-                        <div className="flex gap-4">
-                            <button onClick={generateTemplate} className="flex-1 py-3 px-4 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium transition flex items-center justify-center">
+                        <div className="flex flex-col sm:flex-row gap-2.5 border-t border-blue-100 pt-4">
+                            <button onClick={generateTemplate} className="flex-1 py-3 px-3 bg-blue-50 hover:bg-blue-100 border border-blue-100 text-blue-700 rounded-xl text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 flex items-center justify-center">
                                 <Download className="w-4 h-4 mr-2" /> 템플릿 다운로드
                             </button>
-                            <button onClick={generateSampleData} className="flex-1 py-3 px-4 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium transition flex items-center justify-center">
+                            <button onClick={generateSampleData} className="flex-1 py-3 px-3 bg-blue-50 hover:bg-blue-100 border border-blue-100 text-blue-700 rounded-xl text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 flex items-center justify-center">
                                 <FileSpreadsheet className="w-4 h-4 mr-2" /> 샘플 데이터
                             </button>
                         </div>
                     </div>
 
-                    <div className="flex flex-col">
+                    <div className="min-w-0 flex flex-col rounded-2xl border border-blue-200 bg-white p-2.5">
                         <div 
                             onClick={() => fileInputRef.current?.click()}
-                            className="flex-1 border-3 border-dashed border-indigo-200 rounded-xl bg-indigo-50/50 hover:bg-indigo-50 hover:border-indigo-400 transition cursor-pointer flex flex-col items-center justify-center p-10 group"
+                            className="flex-1 min-w-0 min-h-[260px] border-2 border-dashed border-blue-300 rounded-xl bg-[#eaf4ff] hover:bg-blue-100/70 hover:border-blue-500 transition-colors cursor-pointer flex flex-col items-center justify-center px-5 py-7 text-center group"
                         >
-                            <div className="w-16 h-16 bg-white rounded-full shadow-sm flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                                <Upload className="w-8 h-8 text-indigo-500" />
+                            <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mb-4 group-hover:bg-blue-700 transition-colors">
+                                <Upload className="w-8 h-8 text-white" />
                             </div>
-                            <p className="text-lg font-medium text-gray-700 mb-1">엑셀 파일을 드래그하거나 클릭하세요</p>
+                            <p className="text-base sm:text-lg font-bold text-[#071747] mb-2 leading-7">엑셀 파일을 드래그하거나 클릭하세요</p>
                             <p className="text-sm text-gray-500">.xlsx, .xls 파일 지원</p>
                             {fileName && (
-                                <div className="mt-4 px-4 py-2 bg-white rounded-full shadow-sm text-indigo-600 font-semibold text-sm flex items-center">
+                                <div className="mt-3 max-w-full break-all px-3 py-1.5 bg-white border border-blue-100 rounded-lg text-blue-700 font-medium text-sm flex items-center">
                                     <CheckCircle className="w-4 h-4 mr-2" /> {fileName}
                                 </div>
                             )}
@@ -364,17 +364,17 @@ const App: React.FC = () => {
                 </div>
 
                 {students.length > 0 && (
-                    <div className="bg-gray-50 p-8 border-t border-gray-100">
+                    <div className="bg-white px-5 py-4 sm:px-6 border border-blue-100 rounded-2xl">
                         <div className="flex flex-wrap items-center justify-between gap-4">
-                            <div className="flex gap-6 text-sm text-gray-600">
-                                <span>총 학생: <strong className="text-gray-900">{students.length}명</strong></span>
+                            <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm text-slate-600">
+                                <span>총 학생: <strong className="text-[#071747]">{students.length}명</strong></span>
                                 <span>남: <strong className="text-blue-600">{maleCount}명</strong></span>
                                 <span>여: <strong className="text-pink-600">{femaleCount}명</strong></span>
                                 <span>동명이인: <strong className="text-red-600">{dupCount}명</strong></span>
                             </div>
                             <button 
                                 onClick={() => setStep(2)}
-                                className="px-8 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold shadow-md hover:shadow-lg transition flex items-center"
+                                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 flex items-center"
                             >
                                 다음 단계 <ArrowRight className="w-5 h-5 ml-2" />
                             </button>
@@ -386,70 +386,70 @@ const App: React.FC = () => {
 
         {/* Step 2: Settings */}
         <div className={`transition-all duration-500 ${step === 2 ? 'opacity-100 translate-x-0' : 'hidden opacity-0 translate-x-full'}`}>
-            <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
-                <div className="p-8 border-b border-gray-100 flex justify-between items-center">
-                    <h2 className="text-2xl font-bold text-gray-800 flex items-center">
-                        <Settings className="w-6 h-6 mr-3 text-indigo-500" /> 
+            <div className="space-y-5">
+                <div className="pt-1 pb-1 flex flex-wrap justify-between items-center gap-3">
+                    <h2 className="text-xl sm:text-2xl font-extrabold tracking-tight text-[#071747] flex items-center">
+                        <Settings className="w-10 h-10 p-2 mr-3 rounded-xl bg-blue-100 text-blue-600 shrink-0" /> 
                         2단계: 편성 규칙 설정
                     </h2>
-                    <button onClick={() => setStep(1)} className="text-gray-400 hover:text-gray-600 font-medium">이전으로</button>
+                    <button onClick={() => setStep(1)} className="px-4 py-2 bg-white hover:bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-700 font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2">이전으로</button>
                 </div>
                 
-                <div className="p-8">
-                    <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-                        <div className="space-y-2">
-                            <label className="text-sm font-bold text-gray-700">현재 학급 수</label>
+                <div className="space-y-5">
+                    <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                        <div className="min-w-0 space-y-3 rounded-2xl border border-blue-100 bg-white p-5">
+                            <label className="block text-sm font-semibold text-[#172b4d]">현재 학급 수</label>
                             <input 
                                 type="number" 
                                 value={settings.currentClassCount}
                                 onChange={e => setSettings({...settings, currentClassCount: Number(e.target.value)})}
-                                className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition"
+                                className="w-full min-w-0 px-3 py-2.5 rounded-xl border border-blue-200 bg-blue-50/40 text-base font-semibold text-[#071747] outline-none focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
                             />
                         </div>
-                        <div className="space-y-2">
-                            <label className="text-sm font-bold text-gray-700">편성할 학급 수</label>
+                        <div className="min-w-0 space-y-3 rounded-2xl border border-blue-100 bg-white p-5">
+                            <label className="block text-sm font-semibold text-[#172b4d]">편성할 학급 수</label>
                             <input 
                                 type="number" 
                                 value={settings.nextClassCount}
                                 onChange={e => setSettings({...settings, nextClassCount: Number(e.target.value)})}
-                                className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition"
+                                className="w-full min-w-0 px-3 py-2.5 rounded-xl border border-blue-200 bg-blue-50/40 text-base font-semibold text-[#071747] outline-none focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
                             />
                         </div>
-                        <div className="space-y-2">
-                            <label className="text-sm font-bold text-gray-700">학급당 기준 인원</label>
+                        <div className="min-w-0 space-y-3 rounded-2xl border border-blue-100 bg-white p-5">
+                            <label className="block text-sm font-semibold text-[#172b4d]">학급당 기준 인원</label>
                             <input 
                                 type="number" 
                                 value={settings.normalCapacity}
                                 onChange={e => setSettings({...settings, normalCapacity: Number(e.target.value)})}
-                                className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition"
+                                className="w-full min-w-0 px-3 py-2.5 rounded-xl border border-blue-200 bg-blue-50/40 text-base font-semibold text-[#071747] outline-none focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
                             />
                         </div>
-                        <div className="space-y-2">
-                            <label className="text-sm font-bold text-gray-700">통합학급 감축 인원</label>
+                        <div className="min-w-0 space-y-3 rounded-2xl border border-blue-100 bg-white p-5">
+                            <label className="block text-sm font-semibold text-[#172b4d]">통합학급 감축 인원</label>
                             <input 
                                 type="number" 
                                 value={settings.reductionCount}
                                 onChange={e => setSettings({...settings, reductionCount: Number(e.target.value)})}
-                                className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition"
+                                className="w-full min-w-0 px-3 py-2.5 rounded-xl border border-blue-200 bg-blue-50/40 text-base font-semibold text-[#071747] outline-none focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
                             />
-                            <p className="text-xs text-gray-500">통합학급은 일반학급보다 이만큼 적게 배정합니다.</p>
+                            <p className="text-xs leading-5 text-slate-500">통합학급은 일반학급보다 이만큼 적게 배정합니다.</p>
                         </div>
-                        <div className="space-y-2 lg:col-span-2">
-                            <label className="text-sm font-bold text-gray-700">배치 방식</label>
-                            <div className="grid grid-cols-2 gap-4">
+                        <div className="min-w-0 space-y-3 sm:col-span-2 xl:col-span-4 rounded-2xl border border-blue-100 bg-white p-5">
+                            <label className="block text-sm font-semibold text-[#172b4d]">배치 방식</label>
+                            <div className="grid sm:grid-cols-2 gap-3">
                                 <button 
                                     onClick={() => setSettings({...settings, placementOrder: 'zigzag'})}
-                                    className={`p-4 rounded-lg border-2 text-left transition ${settings.placementOrder === 'zigzag' ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-gray-200 hover:border-gray-300'}`}
+                                    className={`p-4 rounded-xl border text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ${settings.placementOrder === 'zigzag' ? 'border-blue-600 bg-blue-600 text-white' : 'border-blue-200 bg-blue-50/40 text-[#172b4d] hover:border-blue-400 hover:bg-blue-50'}`}
                                 >
-                                    <div className="font-bold mb-1">S자 (지그재그)</div>
-                                    <div className="text-xs opacity-75">1반→2반...끝반→끝반... 반대로 돌아오며 배치</div>
+                                    <div className="text-base font-bold mb-1">S자 (지그재그)</div>
+                                    <div className="text-sm leading-6 opacity-90">1반→2반...끝반→끝반... 반대로 돌아오며 배치</div>
                                 </button>
                                 <button 
                                     onClick={() => setSettings({...settings, placementOrder: 'linear'})}
-                                    className={`p-4 rounded-lg border-2 text-left transition ${settings.placementOrder === 'linear' ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-gray-200 hover:border-gray-300'}`}
+                                    className={`p-4 rounded-xl border text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ${settings.placementOrder === 'linear' ? 'border-blue-600 bg-blue-600 text-white' : 'border-blue-200 bg-blue-50/40 text-[#172b4d] hover:border-blue-400 hover:bg-blue-50'}`}
                                 >
-                                    <div className="font-bold mb-1">순차 배치</div>
-                                    <div className="text-xs opacity-75">1반→2반...끝반→1반 순서대로 계속 배치</div>
+                                    <div className="text-base font-bold mb-1">순차 배치</div>
+                                    <div className="text-sm leading-6 opacity-90">1반→2반...끝반→1반 순서대로 계속 배치</div>
                                 </button>
                             </div>
                         </div>
@@ -457,13 +457,13 @@ const App: React.FC = () => {
 
                     {/* 쌍둥이 배정 옵션 설정 섹션 */}
                     {twinGroups.length > 0 && (
-                        <div className="mt-8 pt-8 border-t border-gray-100">
+                        <div className="rounded-2xl border border-blue-100 bg-white p-5">
                             <div className="mb-4">
-                                <h3 className="text-lg font-bold text-gray-800 flex items-center">
-                                    <Users className="w-5 h-5 mr-2 text-indigo-500" />
+                                <h3 className="text-base sm:text-lg font-bold text-[#071747] flex items-center">
+                                    <Users className="w-5 h-5 mr-2 text-blue-600 shrink-0" />
                                     👶 쌍둥이 배정 방식 선택 ({twinGroups.length}쌍 감지됨)
                                 </h3>
-                                <p className="text-xs text-gray-500 mt-1">
+                                <p className="text-xs leading-5 text-slate-500 mt-1">
                                     학부모 및 학생 희망에 따라 각 쌍둥이별로 서로 다른 반(분리) 또는 같은 반(동일)을 선택해주세요.
                                 </p>
                             </div>
@@ -481,31 +481,31 @@ const App: React.FC = () => {
                                     };
 
                                     return (
-                                        <div key={group.key} className="p-4 bg-purple-50/60 rounded-xl border border-purple-200 flex flex-col justify-between">
+                                        <div key={group.key} className="p-4 bg-blue-50/50 rounded-xl border border-blue-100 flex flex-col justify-between">
                                             <div className="mb-3">
-                                                <div className="text-sm font-bold text-purple-900 flex items-center gap-2">
+                                                <div className="text-sm font-bold text-[#172b4d] flex flex-wrap items-center gap-2">
                                                     <span>쌍둥이 {gIdx + 1}</span>
                                                     <span className="text-xs font-normal text-gray-500">
                                                         ({group.members[0].생년월일 || '생년월일 미입력'})
                                                     </span>
                                                 </div>
-                                                <div className="text-sm text-gray-700 mt-2 flex flex-wrap gap-2">
+                                                <div className="text-sm text-slate-600 mt-2 flex flex-wrap gap-2">
                                                     {group.members.map(m => (
-                                                        <span key={m.id} className="bg-white px-2.5 py-1 rounded-md border border-purple-200 font-medium text-xs text-purple-800 shadow-sm">
+                                                        <span key={m.id} className="bg-white px-2.5 py-1 rounded-lg border border-blue-100 font-medium text-xs text-[#354c75]">
                                                             {m.현학급}반 {m.이름} ({m.성별})
                                                         </span>
                                                     ))}
                                                 </div>
                                             </div>
 
-                                            <div className="grid grid-cols-2 gap-2 mt-2">
+                                            <div className="grid sm:grid-cols-2 gap-2 mt-2">
                                                 <button
                                                     type="button"
                                                     onClick={() => handleTwinOptionChange('분리')}
-                                                    className={`py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                                                    className={`py-2.5 px-3 rounded-xl border text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 flex items-center justify-center gap-1.5 ${
                                                         !isSameClass
-                                                            ? 'bg-indigo-600 text-white shadow-sm ring-2 ring-indigo-300'
-                                                            : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
+                                                            ? 'bg-blue-600 border-blue-600 text-white'
+                                                            : 'bg-white text-[#354c75] border-blue-200 hover:bg-blue-50'
                                                     }`}
                                                 >
                                                     <span>🚫 다른 반 (분리 배정)</span>
@@ -513,10 +513,10 @@ const App: React.FC = () => {
                                                 <button
                                                     type="button"
                                                     onClick={() => handleTwinOptionChange('동일')}
-                                                    className={`py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                                                    className={`py-2.5 px-3 rounded-xl border text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 flex items-center justify-center gap-1.5 ${
                                                         isSameClass
-                                                            ? 'bg-purple-600 text-white shadow-sm ring-2 ring-purple-300'
-                                                            : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
+                                                            ? 'bg-blue-600 border-blue-600 text-white'
+                                                            : 'bg-white text-[#354c75] border-blue-200 hover:bg-blue-50'
                                                     }`}
                                                 >
                                                     <span>🤝 같은 반 (동반 배정)</span>
@@ -530,11 +530,11 @@ const App: React.FC = () => {
                     )}
                 </div>
 
-                <div className="bg-gray-50 p-8 border-t border-gray-100 flex justify-end">
+                <div className="rounded-2xl bg-blue-50 border border-blue-100 px-5 py-4 flex justify-end">
                     <button 
                         onClick={handleRunAlgorithm}
                         disabled={loading}
-                        className="px-8 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold shadow-md hover:shadow-lg transition flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="w-full sm:w-auto justify-center px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         {loading ? (
                            <RefreshCw className="w-5 h-5 mr-2 animate-spin" />
@@ -602,48 +602,54 @@ const App: React.FC = () => {
                 }
 
                 return (
-                    <div className="space-y-6">
+                    <div className="space-y-4">
+                        <div className="pt-1 pb-1 flex items-center">
+                            <h2 className="text-xl sm:text-2xl font-extrabold tracking-tight text-[#071747] flex items-center">
+                                <CheckCircle aria-hidden="true" className="w-10 h-10 p-2 mr-3 rounded-xl bg-blue-100 text-blue-600 shrink-0" />
+                                3단계: 결과 확인
+                            </h2>
+                        </div>
                         {/* Stats Cards */}
                         {/* Stats Cards */}
                         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-                            <div className="bg-white p-4 rounded-xl shadow-sm border border-indigo-100">
-                                <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">총 학생</div>
-                                <div className="text-2xl font-bold text-gray-900">{result.stats.totalStudents}명</div>
+                            <div className="bg-white p-3.5 rounded-xl border border-blue-100">
+                                <div className="flex items-center gap-2 mb-2"><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600"><Users aria-hidden="true" className="h-4 w-4" /></span><span className="text-xs font-semibold text-slate-600">총 학생</span></div>
+                                <div className="text-2xl font-extrabold tracking-tight text-[#071747]">{result.stats.totalStudents}명</div>
                             </div>
-                            <div className="bg-white p-4 rounded-xl shadow-sm border border-indigo-100">
-                                <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">편성 학급</div>
-                                <div className="text-2xl font-bold text-indigo-600">{result.activeClassNames.length}개 반</div>
+                            <div className="bg-white p-3.5 rounded-xl border border-blue-100">
+                                <div className="flex items-center gap-2 mb-2"><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-sky-50 text-sky-600"><Layers aria-hidden="true" className="h-4 w-4" /></span><span className="text-xs font-semibold text-slate-600">편성 학급</span></div>
+                                <div className="text-2xl font-extrabold tracking-tight text-[#071747]">{result.activeClassNames.length}개 반</div>
                             </div>
-                            <div className="bg-white p-4 rounded-xl shadow-sm border border-indigo-100">
-                                <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">생활지도 '상'</div>
-                                <div className="text-2xl font-bold text-orange-500">{result.stats.highGuidance}명</div>
+                            <div className="bg-white p-3.5 rounded-xl border border-blue-100">
+                                <div className="flex items-center gap-2 mb-2"><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-orange-50 text-orange-600"><ShieldCheck aria-hidden="true" className="h-4 w-4" /></span><span className="text-xs font-semibold text-slate-600">생활지도 '상'</span></div>
+                                <div className="text-2xl font-extrabold tracking-tight text-[#071747]">{result.stats.highGuidance}명</div>
                             </div>
-                            <div className="bg-white p-4 rounded-xl shadow-sm border border-indigo-100">
-                                <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">통합 학급</div>
-                                <div className="text-2xl font-bold text-emerald-600">{result.stats.integrated}명</div>
+                            <div className="bg-white p-3.5 rounded-xl border border-blue-100">
+                                <div className="flex items-center gap-2 mb-2"><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600"><Users aria-hidden="true" className="h-4 w-4" /></span><span className="text-xs font-semibold text-slate-600">통합 학급</span></div>
+                                <div className="text-2xl font-extrabold tracking-tight text-[#071747]">{result.stats.integrated}명</div>
                             </div>
-                            <div className="bg-white p-4 rounded-xl shadow-sm border border-amber-100">
-                                <div className="text-xs font-bold text-amber-600 uppercase tracking-wider mb-1">학습부진</div>
-                                <div className="text-2xl font-bold text-amber-700">{result.stats.underachieving ?? allAssignedStudents.filter(s => s.학습부진).length}명</div>
+                            <div className="bg-white p-3.5 rounded-xl border border-blue-100">
+                                <div className="flex items-center gap-2 mb-2"><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-amber-50 text-amber-600"><BookOpen aria-hidden="true" className="h-4 w-4" /></span><span className="text-xs font-semibold text-slate-600">학습부진</span></div>
+                                <div className="text-2xl font-extrabold tracking-tight text-[#071747]">{result.stats.underachieving ?? allAssignedStudents.filter(s => s.학습부진).length}명</div>
                             </div>
-                            <div className="bg-white p-4 rounded-xl shadow-sm border border-blue-100">
-                                <div className="text-xs font-bold text-blue-600 uppercase tracking-wider mb-1">운동부(선수)</div>
-                                <div className="text-2xl font-bold text-blue-700">{result.stats.athletes ?? allAssignedStudents.filter(s => s.학생선수).length}명</div>
+                            <div className="bg-white p-3.5 rounded-xl border border-blue-100">
+                                <div className="flex items-center gap-2 mb-2"><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-cyan-50 text-cyan-600"><CheckCircle aria-hidden="true" className="h-4 w-4" /></span><span className="text-xs font-semibold text-slate-600">운동부(선수)</span></div>
+                                <div className="text-2xl font-extrabold tracking-tight text-[#071747]">{result.stats.athletes ?? allAssignedStudents.filter(s => s.학생선수).length}명</div>
                             </div>
                         </div>
 
                         {/* 보기 기준 전환 및 특이사항 필터 컨트롤 바 */}
-                        <div className="flex flex-wrap items-center justify-between gap-4 p-4 bg-white rounded-xl shadow-sm border border-indigo-100">
+                        <div className="flex flex-wrap items-center justify-between gap-3 p-3 sm:p-4 bg-white rounded-2xl border border-blue-100">
                             <div className="flex flex-wrap items-center gap-2">
                                 <span className="text-sm font-bold text-gray-700 mr-1">보기 기준:</span>
-                                <div className="inline-flex rounded-lg bg-gray-100 p-1 border border-gray-200">
+                                <div className="inline-flex flex-wrap gap-1 rounded-xl bg-blue-50 p-1 border border-blue-100">
                                     <button
                                         type="button"
                                         onClick={() => { setResultViewMode('newClass'); setActiveTab('ALL'); }}
-                                        className={`px-4 py-2 rounded-md text-sm font-bold transition flex items-center gap-1.5 ${
+                                        className={`px-3 py-2 rounded-lg text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 flex items-center gap-1.5 ${
                                             resultViewMode === 'newClass'
-                                                ? 'bg-indigo-600 text-white shadow-sm'
-                                                : 'text-gray-600 hover:text-gray-900'
+                                                ? 'bg-blue-600 text-white'
+                                                : 'text-[#354c75] hover:text-blue-700 hover:bg-white'
                                         }`}
                                     >
                                         <span>🏫 배정반(새 학급) 기준</span>
@@ -651,10 +657,10 @@ const App: React.FC = () => {
                                     <button
                                         type="button"
                                         onClick={() => { setResultViewMode('oldClass'); setActiveTab('ALL'); }}
-                                        className={`px-4 py-2 rounded-md text-sm font-bold transition flex items-center gap-1.5 ${
+                                        className={`px-3 py-2 rounded-lg text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 flex items-center gap-1.5 ${
                                             resultViewMode === 'oldClass'
-                                                ? 'bg-indigo-600 text-white shadow-sm'
-                                                : 'text-gray-600 hover:text-gray-900'
+                                                ? 'bg-blue-600 text-white'
+                                                : 'text-[#354c75] hover:text-blue-700 hover:bg-white'
                                         }`}
                                     >
                                         <span>📋 기존반(현재 학급) 기준</span>
@@ -666,10 +672,10 @@ const App: React.FC = () => {
                                 <button
                                     type="button"
                                     onClick={() => setFilterSpecialOnly(prev => !prev)}
-                                    className={`px-4 py-2 rounded-lg text-sm font-bold transition flex items-center gap-2 border ${
+                                    className={`px-3 py-2 rounded-xl text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 flex items-center gap-2 border ${
                                         filterSpecialOnly
-                                            ? 'bg-amber-500 text-white border-amber-600 shadow-sm ring-2 ring-amber-300'
-                                            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                                            ? 'bg-amber-100 text-amber-950 border-amber-500 ring-1 ring-amber-500'
+                                            : 'bg-amber-50 text-amber-900 border-amber-200 hover:bg-amber-100'
                                     }`}
                                 >
                                     <span>⭐ 특이사항 있는 학생만 모아보기</span>
@@ -683,19 +689,19 @@ const App: React.FC = () => {
                         </div>
 
                         {/* 메인 결과 테이블 카드 */}
-                        <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
+                        <div className="bg-white rounded-2xl border border-blue-100 overflow-hidden">
                             {/* 상단 탭 */}
-                            <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50 overflow-x-auto">
-                                <div className="flex space-x-2">
+                            <div className="p-3 sm:p-4 border-b border-blue-100 flex justify-between items-center bg-blue-50/50 overflow-x-auto">
+                                <div className="flex gap-2">
                                     <button 
                                         onClick={() => setActiveTab('ALL')}
-                                        className={`px-4 py-2 rounded-lg text-sm font-bold transition whitespace-nowrap ${activeTab === 'ALL' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-600 hover:bg-gray-200'}`}
+                                        className={`px-3 py-2 rounded-full text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 whitespace-nowrap ${activeTab === 'ALL' ? 'bg-blue-600 text-white' : 'text-[#354c75] bg-white hover:bg-blue-100 ring-1 ring-inset ring-blue-100'}`}
                                     >
                                         전체 보기 ({allAssignedStudents.length}명)
                                     </button>
                                     <button 
                                         onClick={() => setActiveTab('SPECIAL_DASHBOARD')}
-                                        className={`px-4 py-2 rounded-lg text-sm font-bold transition whitespace-nowrap flex items-center gap-1.5 border ${activeTab === 'SPECIAL_DASHBOARD' ? 'bg-amber-600 text-white border-amber-700 shadow-md ring-2 ring-amber-300' : 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100'}`}
+                                        className={`px-3 py-2 rounded-full text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 whitespace-nowrap flex items-center gap-1.5 border ${activeTab === 'SPECIAL_DASHBOARD' ? 'bg-amber-100 text-amber-950 border-amber-500' : 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100'}`}
                                     >
                                         <span>⭐ 특이사항 종합 대시보드</span>
                                         <span className={`text-xs px-2 py-0.5 rounded-full font-extrabold ${activeTab === 'SPECIAL_DASHBOARD' ? 'bg-white text-amber-700' : 'bg-amber-200 text-amber-900'}`}>
@@ -710,7 +716,7 @@ const App: React.FC = () => {
                                                 <button 
                                                     key={name}
                                                     onClick={() => setActiveTab(name)}
-                                                    className={`px-4 py-2 rounded-lg text-sm font-bold transition whitespace-nowrap flex items-center gap-1.5 ${activeTab === name ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-600 hover:bg-gray-200'}`}
+                                                    className={`px-3 py-2 rounded-full text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 whitespace-nowrap flex items-center gap-1.5 ${activeTab === name ? 'bg-blue-600 text-white' : 'text-[#354c75] bg-white hover:bg-blue-100 ring-1 ring-inset ring-blue-100'}`}
                                                 >
                                                     <span>{name}반</span>
                                                     <span className="text-xs opacity-80 font-normal">({classStudents.length})</span>
@@ -733,7 +739,7 @@ const App: React.FC = () => {
                                                 <button 
                                                     key={classNum}
                                                     onClick={() => setActiveTab(String(classNum))}
-                                                    className={`px-4 py-2 rounded-lg text-sm font-bold transition whitespace-nowrap ${activeTab === String(classNum) ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-600 hover:bg-gray-200'}`}
+                                                    className={`px-3 py-2 rounded-full text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 whitespace-nowrap ${activeTab === String(classNum) ? 'bg-blue-600 text-white' : 'text-[#354c75] bg-white hover:bg-blue-100 ring-1 ring-inset ring-blue-100'}`}
                                                 >
                                                     {classNum}반 <span className="text-xs opacity-80 font-normal ml-1">({count})</span>
                                                 </button>
@@ -742,19 +748,19 @@ const App: React.FC = () => {
                                     )}
                                 </div>
                                 <div className="flex gap-2 ml-4">
-                                    <button onClick={() => setStep(2)} title="설정으로 돌아가기" className="p-2 text-gray-400 hover:text-gray-600">
+                                    <button onClick={() => setStep(2)} title="설정으로 돌아가기" className="p-2 rounded-lg border border-blue-100 bg-white text-blue-600 hover:bg-blue-100">
                                         <RefreshCw className="w-5 h-5" />
                                     </button>
                                 </div>
                             </div>
 
-                            <div className="p-6">
+                            <div className="p-4 sm:p-5">
                                 {/* ========================================================================= */}
                                 {/* 특이사항 종합 대시보드 전용 뷰 */}
                                 {/* ========================================================================= */}
                                 {activeTab === 'SPECIAL_DASHBOARD' && (
-                                    <div className="mb-8 space-y-6">
-                                        <div className="p-4 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl flex flex-wrap items-center justify-between gap-4">
+                                    <div className="mb-5 space-y-4">
+                                        <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl flex flex-wrap items-center justify-between gap-4">
                                             <div className="flex items-center gap-3">
                                                 <span className="text-3xl">⭐</span>
                                                 <div>
@@ -766,12 +772,12 @@ const App: React.FC = () => {
                                             </div>
                                             <div className="text-right">
                                                 <span className="text-xs text-amber-800 font-bold">특이사항 총 학생수: </span>
-                                                <span className="px-2.5 py-1 bg-amber-600 text-white font-extrabold rounded-lg text-sm shadow-sm">{totalSpecialCount}명</span>
+                                                <span className="px-2.5 py-1 bg-amber-600 text-white font-extrabold rounded-lg text-sm shadow-none">{totalSpecialCount}명</span>
                                             </div>
                                         </div>
 
                                         {/* 반별 특이사항 분포 비교 매트릭스 테이블 */}
-                                        <div className="overflow-x-auto border border-gray-200 rounded-xl shadow-sm bg-white">
+                                        <div className="overflow-x-auto border border-gray-200 rounded-xl shadow-none bg-white">
                                             <table className="w-full text-xs sm:text-sm text-center border-collapse">
                                                 <thead className="text-xs uppercase bg-slate-800 text-white font-bold">
                                                     <tr>
@@ -802,7 +808,7 @@ const App: React.FC = () => {
                                                         const transferCount = cStudents.filter(s => s.전출예정).length;
                                                         return (
                                                             <tr key={name} className="hover:bg-slate-50 transition-colors font-medium">
-                                                                <td className="py-2.5 px-3 font-bold text-indigo-700">{name}반</td>
+                                                                <td className="py-2.5 px-3 font-bold text-blue-700">{name}반</td>
                                                                 <td className="py-2.5 px-3">
                                                                     <span className="font-bold">{cStudents.length}명</span>
                                                                     {specCount > 0 && (
@@ -854,7 +860,7 @@ const App: React.FC = () => {
                                     return (
                                         <div className="mb-4 space-y-2">
                                             {integratedCount > 0 && (
-                                                <div className="p-3.5 bg-emerald-50 border-2 border-emerald-400 rounded-xl flex flex-wrap items-center justify-between gap-3 text-emerald-900 shadow-sm">
+                                                <div className="p-3.5 bg-emerald-50 border-2 border-emerald-400 rounded-xl flex flex-wrap items-center justify-between gap-3 text-emerald-900 shadow-none">
                                                     <div className="flex items-center gap-2.5">
                                                         <span className="text-2xl">🌿</span>
                                                         <div>
@@ -869,14 +875,14 @@ const App: React.FC = () => {
                                                             </div>
                                                         </div>
                                                     </div>
-                                                    <div className="px-3 py-1 bg-emerald-600 text-white text-xs font-extrabold rounded-lg shadow-sm">
+                                                    <div className="px-3 py-1 bg-emerald-600 text-white text-xs font-extrabold rounded-lg shadow-none">
                                                         정원 감축 적용반 (-{totalReduction}명)
                                                     </div>
                                                 </div>
                                             )}
 
-                                            <div className="flex flex-wrap items-center gap-4 text-sm bg-indigo-50/50 p-4 rounded-lg border border-indigo-100">
-                                                <div className="font-bold text-indigo-900">{activeTab}반 요약:</div>
+                                            <div className="flex flex-wrap items-center gap-4 text-sm bg-blue-50/50 p-4 rounded-lg border border-blue-100">
+                                                <div className="font-bold text-blue-900">{activeTab}반 요약:</div>
                                                 <div>총원: <strong className="text-gray-900">{targetStudents.length}명</strong></div>
                                                 <div>남: <span className="text-blue-600 font-bold">{targetStudents.filter(s => s.성별 === '남성').length}명</span></div>
                                                 <div>여: <span className="text-pink-600 font-bold">{targetStudents.filter(s => s.성별 === '여성').length}명</span></div>
@@ -896,8 +902,8 @@ const App: React.FC = () => {
 
                                 {/* 요약 카드: 기존반 기준 */}
                                 {resultViewMode === 'oldClass' && activeTab !== 'ALL' && activeTab !== 'SPECIAL_DASHBOARD' && (
-                                    <div className="mb-4 bg-purple-50/50 p-4 rounded-lg border border-purple-100">
-                                        <div className="font-bold text-purple-900 mb-2">
+                                    <div className="mb-4 bg-blue-50/50 p-4 rounded-lg border border-blue-100">
+                                        <div className="font-bold text-blue-900 mb-2">
                                             기존 {activeTab}반 학생 (총 {currentGroupStudents.length}명) ➡️ 배정 학급별 분산 현황:
                                         </div>
                                         <div className="flex flex-wrap gap-2">
@@ -906,7 +912,7 @@ const App: React.FC = () => {
                                                 const isTargetIntegrated = result.assignments[cName]?.some(s => s.통합학급);
                                                 return (
                                                     <span key={cName} className={`px-2.5 py-1 rounded-md text-xs font-semibold border flex items-center gap-1.5 ${
-                                                        count > 0 ? 'bg-white border-purple-200 text-purple-800 shadow-sm' : 'bg-gray-100 text-gray-400 border-gray-200'
+                                                        count > 0 ? 'bg-white border-blue-200 text-blue-800 shadow-none' : 'bg-gray-100 text-gray-400 border-gray-200'
                                                     }`}>
                                                         <span>{cName}반: {count}명</span>
                                                         {isTargetIntegrated && (
@@ -940,7 +946,7 @@ const App: React.FC = () => {
 
                                 {/* 맞교환(Swap) 모드 활성화 배너 */}
                                 {swapCandidate && (
-                                    <div className="mb-4 p-4 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl shadow-md flex flex-wrap items-center justify-between gap-3 animate-pulse">
+                                    <div className="mb-4 p-4 bg-amber-600 text-white rounded-xl shadow-none flex flex-wrap items-center justify-between gap-3 animate-pulse">
                                         <div className="flex items-center gap-3">
                                             <span className="text-2xl">🔄</span>
                                             <div>
@@ -955,7 +961,7 @@ const App: React.FC = () => {
                                         <button
                                             type="button"
                                             onClick={() => setSwapCandidate(null)}
-                                            className="px-3 py-1.5 bg-white text-amber-700 font-bold text-xs rounded-lg shadow-sm hover:bg-amber-50 transition"
+                                            className="px-3 py-1.5 bg-white text-amber-700 font-bold text-xs rounded-lg shadow-none hover:bg-amber-50 transition"
                                         >
                                             맞교환 취소 ✕
                                         </button>
@@ -973,17 +979,17 @@ const App: React.FC = () => {
                                 />
                             </div>
                              
-                            <div className="p-6 bg-gray-50 border-t border-gray-100 flex flex-wrap justify-center gap-4">
+                            <div className="p-4 bg-blue-50/50 border-t border-blue-100 flex flex-wrap justify-end gap-3">
                                 <button 
                                     onClick={handleDownloadNewClass}
-                                    className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold shadow-md hover:shadow-lg transition flex items-center"
+                                    className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 flex items-center"
                                 >
                                     <Download className="w-5 h-5 mr-2" /> 
                                     배정 학급 기준 명렬표 다운로드
                                 </button>
                                 <button 
                                     onClick={handleDownloadOldClass}
-                                    className="px-6 py-3 bg-slate-600 hover:bg-slate-700 text-white rounded-lg font-bold shadow-md hover:shadow-lg transition flex items-center"
+                                    className="px-4 py-2.5 bg-white hover:bg-blue-50 border border-blue-200 text-blue-700 rounded-xl text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 flex items-center"
                                 >
                                     <FileSpreadsheet className="w-5 h-5 mr-2" /> 
                                     기존 학급 기준 명렬표 다운로드

@@ -1,0 +1,15 @@
+{
+  "projects": {
+    "default": "class-divide"
+  },
+  "targets": {
+    "class-divide": {
+      "database": {
+        "main": [
+          "class-divide-default-rtdb"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

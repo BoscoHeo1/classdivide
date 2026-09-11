@@ -1,0 +1,142 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "classdivide_workspaces": {
+      "$roomCode": {
+        ".read": "auth != null && root.child('roomMembers').child($roomCode).child(auth.uid).child('active').val() == true",
+        ".write": "(auth != null && root.child('roomMembers').child($roomCode).child(auth.uid).child('active').val() == true && root.child('roomMembers').child($roomCode).child(auth.uid).child('role').val() == 'admin' && newData.exists()) || (auth != null && !data.exists() && !root.child('roomMembers').child($roomCode).exists() && !root.child('roomSecrets').child($roomCode).exists() && !root.child('roomRecovery').child($roomCode).exists() && !newData.child('recoveryInstanceId').exists() && newData.child('hostId').val() == auth.uid && newData.child('step').val() == 1 && !newData.child('result').exists() && !newData.child('classInputs').exists())",
+        ".validate": "newData.hasChildren(['code','name','hostId','currentClassCount','nextClassCount','reductionCount','placementOrder','step','updatedAt']) && (!data.exists() || newData.child('hostId').val() == data.child('hostId').val()) && (!data.child('recoveryInstanceId').exists() || (newData.child('recoveryInstanceId').exists() && newData.child('recoveryInstanceId').val() == data.child('recoveryInstanceId').val()))",
+        "code": {
+          ".validate": "newData.isString() && newData.val() == $roomCode && newData.val().matches(/^[A-Z0-9_-]{1,40}$/)"
+        },
+        "name": {
+          ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 160"
+        },
+        "hostId": {
+          ".validate": "newData.isString() && (!data.exists() ? newData.val() == auth.uid : newData.val() == data.val())"
+        },
+        "placementOrder": {
+          ".validate": "newData.val() == 'zigzag' || newData.val() == 'linear'"
+        },
+        "step": {
+          ".validate": "newData.val() == 1 || newData.val() == 3"
+        },
+        "updatedAt": {
+          ".validate": "newData.isNumber()"
+        },
+        "result": {
+          ".validate": "newData.hasChildren(['stats','activeClassNames'])"
+        },
+        "$other": {
+          ".validate": false
+        },
+        "currentClassCount": {
+          ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 20 && newData.val() % 1 == 0"
+        },
+        "nextClassCount": {
+          ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 20 && newData.val() % 1 == 0"
+        },
+        "reductionCount": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100"
+        },
+        "classInputs": {
+          "$classNum": {
+            ".write": "(auth != null && root.child('roomMembers').child($roomCode).child(auth.uid).child('active').val() == true && root.child('roomMembers').child($roomCode).child(auth.uid).child('role').val() == 'teacher' && root.child('roomMembers').child($roomCode).child(auth.uid).child('classNum').isNumber() && $classNum == (root.child('roomMembers').child($roomCode).child(auth.uid).child('classNum').val() + '') && root.child('classdivide_workspaces').child($roomCode).child('step').val() == 1 && root.child('roomMembers').child($roomCode).child(auth.uid).child('classNum').val() >= 1 && root.child('roomMembers').child($roomCode).child(auth.uid).child('classNum').val() <= root.child('classdivide_workspaces').child($roomCode).child('currentClassCount').val())",
+            ".validate": "(($classNum == '1' && newData.parent().parent().child('currentClassCount').val() >= 1) || ($classNum == '2' && newData.parent().parent().child('currentClassCount').val() >= 2) || ($classNum == '3' && newData.parent().parent().child('currentClassCount').val() >= 3) || ($classNum == '4' && newData.parent().parent().child('currentClassCount').val() >= 4) || ($classNum == '5' && newData.parent().parent().child('currentClassCount').val() >= 5) || ($classNum == '6' && newData.parent().parent().child('currentClassCount').val() >= 6) || ($classNum == '7' && newData.parent().parent().child('currentClassCount').val() >= 7) || ($classNum == '8' && newData.parent().parent().child('currentClassCount').val() >= 8) || ($classNum == '9' && newData.parent().parent().child('currentClassCount').val() >= 9) || ($classNum == '10' && newData.parent().parent().child('currentClassCount').val() >= 10) || ($classNum == '11' && newData.parent().parent().child('currentClassCount').val() >= 11) || ($classNum == '12' && newData.parent().parent().child('currentClassCount').val() >= 12) || ($classNum == '13' && newData.parent().parent().child('currentClassCount').val() >= 13) || ($classNum == '14' && newData.parent().parent().child('currentClassCount').val() >= 14) || ($classNum == '15' && newData.parent().parent().child('currentClassCount').val() >= 15) || ($classNum == '16' && newData.parent().parent().child('currentClassCount').val() >= 16) || ($classNum == '17' && newData.parent().parent().child('currentClassCount').val() >= 17) || ($classNum == '18' && newData.parent().parent().child('currentClassCount').val() >= 18) || ($classNum == '19' && newData.parent().parent().child('currentClassCount').val() >= 19) || ($classNum == '20' && newData.parent().parent().child('currentClassCount').val() >= 20))",
+            "$row": {
+              ".validate": "newData.hasChildren(['id','이름','현학급']) && newData.child('현학급').isNumber() && $classNum == (newData.child('현학급').val() + '')",
+              "id": {
+                ".validate": "newData.isNumber()"
+              },
+              "현학급": {
+                ".validate": "newData.isNumber() && $classNum == (newData.val() + '')"
+              },
+              "이름": {
+                ".validate": "newData.isString() && newData.val().length > 0"
+              },
+              "$field": {
+                ".validate": "newData.isString() || newData.isNumber() || newData.isBoolean()"
+              }
+            }
+          }
+        },
+        "classStatus": {
+          "$classNum": {
+            ".write": "(auth != null && root.child('roomMembers').child($roomCode).child(auth.uid).child('active').val() == true && root.child('roomMembers').child($roomCode).child(auth.uid).child('role').val() == 'teacher' && root.child('roomMembers').child($roomCode).child(auth.uid).child('classNum').isNumber() && $classNum == (root.child('roomMembers').child($roomCode).child(auth.uid).child('classNum').val() + '') && root.child('classdivide_workspaces').child($roomCode).child('step').val() == 1 && root.child('roomMembers').child($roomCode).child(auth.uid).child('classNum').val() >= 1 && root.child('roomMembers').child($roomCode).child(auth.uid).child('classNum').val() <= root.child('classdivide_workspaces').child($roomCode).child('currentClassCount').val())",
+            ".validate": "(($classNum == '1' && newData.parent().parent().child('currentClassCount').val() >= 1) || ($classNum == '2' && newData.parent().parent().child('currentClassCount').val() >= 2) || ($classNum == '3' && newData.parent().parent().child('currentClassCount').val() >= 3) || ($classNum == '4' && newData.parent().parent().child('currentClassCount').val() >= 4) || ($classNum == '5' && newData.parent().parent().child('currentClassCount').val() >= 5) || ($classNum == '6' && newData.parent().parent().child('currentClassCount').val() >= 6) || ($classNum == '7' && newData.parent().parent().child('currentClassCount').val() >= 7) || ($classNum == '8' && newData.parent().parent().child('currentClassCount').val() >= 8) || ($classNum == '9' && newData.parent().parent().child('currentClassCount').val() >= 9) || ($classNum == '10' && newData.parent().parent().child('currentClassCount').val() >= 10) || ($classNum == '11' && newData.parent().parent().child('currentClassCount').val() >= 11) || ($classNum == '12' && newData.parent().parent().child('currentClassCount').val() >= 12) || ($classNum == '13' && newData.parent().parent().child('currentClassCount').val() >= 13) || ($classNum == '14' && newData.parent().parent().child('currentClassCount').val() >= 14) || ($classNum == '15' && newData.parent().parent().child('currentClassCount').val() >= 15) || ($classNum == '16' && newData.parent().parent().child('currentClassCount').val() >= 16) || ($classNum == '17' && newData.parent().parent().child('currentClassCount').val() >= 17) || ($classNum == '18' && newData.parent().parent().child('currentClassCount').val() >= 18) || ($classNum == '19' && newData.parent().parent().child('currentClassCount').val() >= 19) || ($classNum == '20' && newData.parent().parent().child('currentClassCount').val() >= 20)) && newData.hasChildren(['completed'])",
+            "completed": {
+              ".validate": "newData.isBoolean()"
+            },
+            "teacherName": {
+              ".validate": "newData.isString() && newData.val().length <= 160"
+            },
+            "updatedAt": {
+              ".validate": "newData.isNumber()"
+            },
+            "$other": {
+              ".validate": false
+            }
+          }
+        },
+        "recoveryInstanceId": {
+          ".validate": "data.exists() && newData.isString() && newData.val() == data.val()"
+        }
+      }
+    },
+    "roomMembers": {
+      "$roomCode": {
+        ".read": "(auth != null && root.child('roomMembers').child($roomCode).child(auth.uid).child('active').val() == true && root.child('roomMembers').child($roomCode).child(auth.uid).child('role').val() == 'admin')",
+        ".write": "(auth != null && root.child('roomMembers').child($roomCode).child(auth.uid).child('active').val() == true && root.child('roomMembers').child($roomCode).child(auth.uid).child('role').val() == 'admin') && !newData.exists()",
+        "$uid": {
+          ".read": "auth != null && auth.uid == $uid",
+          ".write": "(auth != null && auth.uid == $uid && !root.child('roomMembers').child($roomCode).exists() && root.child('classdivide_workspaces').child($roomCode).child('hostId').val() == auth.uid && newData.child('role').val() == 'admin' && newData.child('active').val() == true && newData.child('classNum').val() == 0) || ((auth != null && root.child('roomMembers').child($roomCode).child(auth.uid).child('active').val() == true && root.child('roomMembers').child($roomCode).child(auth.uid).child('role').val() == 'admin') && auth.uid != $uid && newData.child('role').val() == 'teacher' && newData.child('active').val() == true && root.child('roomJoinRequests').child($roomCode).child($uid).exists() && newData.child('classNum').val() == root.child('roomJoinRequests').child($roomCode).child($uid).child('classNum').val())",
+          ".validate": "newData.hasChildren(['role','active','classNum'])",
+          "role": {
+            ".validate": "newData.val() == 'admin' || newData.val() == 'teacher'"
+          },
+          "active": {
+            ".validate": "newData.isBoolean()"
+          },
+          "classNum": {
+            ".validate": "newData.isNumber() && newData.val() % 1 == 0 && ((newData.parent().child('role').val() == 'admin' && newData.val() == 0) || (newData.parent().child('role').val() == 'teacher' && newData.val() >= 1 && newData.val() <= root.child('classdivide_workspaces').child($roomCode).child('currentClassCount').val()))"
+          },
+          "$other": {
+            ".validate": false
+          }
+        }
+      }
+    },
+    "roomJoinRequests": {
+      "$roomCode": {
+        ".read": "(auth != null && root.child('roomMembers').child($roomCode).child(auth.uid).child('active').val() == true && root.child('roomMembers').child($roomCode).child(auth.uid).child('role').val() == 'admin')",
+        ".write": "(auth != null && root.child('roomMembers').child($roomCode).child(auth.uid).child('active').val() == true && root.child('roomMembers').child($roomCode).child(auth.uid).child('role').val() == 'admin') && !newData.exists()",
+        "$uid": {
+          ".read": "auth != null && auth.uid == $uid",
+          ".write": "((auth != null && root.child('roomMembers').child($roomCode).child(auth.uid).child('active').val() == true && root.child('roomMembers').child($roomCode).child(auth.uid).child('role').val() == 'admin') && !newData.exists()) || (auth != null && auth.uid == $uid && ((!newData.exists()) || (!data.exists() && root.child('classdivide_workspaces').child($roomCode).exists() && root.child('roomMembers').child($roomCode).child(auth.uid).child('active').val() != true)))",
+          ".validate": "newData.hasChildren(['classNum','teacherName','requestedAt'])",
+          "classNum": {
+            ".validate": "newData.isNumber() && newData.val() % 1 == 0 && newData.val() >= 1 && newData.val() <= root.child('classdivide_workspaces').child($roomCode).child('currentClassCount').val()"
+          },
+          "teacherName": {
+            ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 80"
+          },
+          "requestedAt": {
+            ".validate": "newData.isNumber() && newData.val() <= now + 60000"
+          },
+          "$other": {
+            ".validate": false
+          }
+        }
+      }
+    },
+    "roomSecrets": {
+      ".read": false,
+      ".write": false
+    },
+    "roomRecovery": {
+      ".read": false,
+      ".write": false
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "database": [
+    {
+      "target": "main",
+      "rules": "database.rules.json"
+    }
+  ],
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "classdivide-recovery",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log"
+      ]
+    }
+  ]
+}
