@@ -898,6 +898,14 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
               >
                 <Settings size={13} /> 학년 설정 수정
               </button>
+              <button
+                type="button"
+                onClick={() => { handleOpenSettingsModal(); setShowDeleteConfirm(true); }}
+                disabled={loading || recoveryBusy}
+                className="flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2"
+              >
+                <Trash2 size={13} /> 방 삭제
+              </button>
             </>
           ) : (
             <button
@@ -1578,3 +1586,4 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
     </div>
   );
 };
+
