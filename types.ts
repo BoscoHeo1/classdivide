@@ -20,12 +20,19 @@ export interface Student {
   출석번호?: number;
 }
 
+export interface TwinGroupConfig {
+  id: string;
+  studentIds: number[];
+  option: '분리' | '동일';
+}
+
 export interface ClassSettings {
   currentClassCount: number;
   nextClassCount: number;
   normalCapacity: number;
   reductionCount: number; // Reduction for integrated class
   placementOrder: 'zigzag' | 'linear';
+  twinGroups?: TwinGroupConfig[];
 }
 
 export interface PlacementResult {
@@ -61,5 +68,6 @@ export interface GradeWorkspace {
   step: number; // 1: 입력취합, 2: 배정설정, 3: 결과확인
   result?: PlacementResult; // 최종 배정 결과
   hostId?: string; // 개설자 고유 브라우저 식별자
+  twinGroups?: TwinGroupConfig[]; // 🌟 명시적 쌍둥이 그룹 설정
   updatedAt: number;
 }

@@ -28,6 +28,25 @@
         "result": {
           ".validate": "newData.hasChildren(['stats','activeClassNames'])"
         },
+        "twinGroups": {
+          "$groupIdx": {
+            ".validate": "newData.hasChildren(['id','option'])",
+            "id": {
+              ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100"
+            },
+            "option": {
+              ".validate": "newData.val() == '분리' || newData.val() == '동일'"
+            },
+            "studentIds": {
+              "$idx": {
+                ".validate": "newData.isNumber()"
+              }
+            },
+            "$other": {
+              ".validate": false
+            }
+          }
+        },
         "$other": {
           ".validate": false
         },

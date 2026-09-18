@@ -2,7 +2,7 @@ import { initializeApp } from "firebase/app";
 import { getAuth, signInAnonymously } from "firebase/auth";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { getDatabase, ref, set, get, update, onValue, serverTimestamp } from "firebase/database";
-import { GradeWorkspace, Student, PlacementResult, ClassSettings } from "./types";
+import { GradeWorkspace, Student, PlacementResult, ClassSettings, TwinGroupConfig } from "./types";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCJNtARfZj7lndDBR6UUTAJzwClOCndclY",
@@ -122,7 +122,17 @@ const toWorkspace = (data: any): CollaborationWorkspace | null => {
     .flatMap(([classNum, rows]) => Object.values(rows || {}).filter(Boolean).map((student: any, index) => ({
       ...student, id: Number(classNum) * 1000000 + index + 1, 현학급: Number(classNum)
     })));
-  return { ...data, students, classStatus: data.classStatus || {} };
+  const rawTwinGroups = data.twinGroups
+    ? (Array.isArray(data.twinGroups) ? data.twinGroups : Object.values(data.twinGroups))
+    : [];
+  const twinGroups: TwinGroupConfig[] = rawTwinGroups.filter(Boolean).map((g: any) => ({
+    id: String(g.id || ''),
+    option: (g.option === '동일' ? '동일' : '분리') as '분리' | '동일',
+    studentIds: Array.isArray(g.studentIds)
+      ? g.studentIds.map(Number)
+      : Object.values(g.studentIds || {}).map(Number)
+  }));
+  return { ...data, students, classStatus: data.classStatus || {}, twinGroups };
 };
 export const getWorkspace = async (rawCode: string): Promise<CollaborationWorkspace | null> => {
   await requireMember(rawCode);
@@ -153,9 +163,12 @@ const adminUpdate = async (rawCode: string, changes: object) => {
   await requireMember(rawCode, true);
   await update(ref(rtdb, `classdivide_workspaces/${sanitizeCode(rawCode)}`), normalize({ ...changes, updatedAt: Date.now() }));
 };
+export const updateWorkspaceTwinGroups = async (rawCode: string, twinGroups: TwinGroupConfig[]) =>
+  adminUpdate(rawCode, { twinGroups });
 export const executeWorkspacePlacement = async (rawCode: string, result: PlacementResult, settings: ClassSettings) =>
   adminUpdate(rawCode, { step: 3, result, currentClassCount: settings.currentClassCount,
-    nextClassCount: settings.nextClassCount, reductionCount: settings.reductionCount, placementOrder: settings.placementOrder });
+    nextClassCount: settings.nextClassCount, reductionCount: settings.reductionCount, placementOrder: settings.placementOrder,
+    twinGroups: settings.twinGroups || [] });
 export const updateWorkspaceResult = async (rawCode: string, result: PlacementResult) => adminUpdate(rawCode, { result });
 export const resetWorkspaceToInput = async (rawCode: string) => adminUpdate(rawCode, { step: 1, result: null });
 export const updateWorkspaceSettings = async (rawCode: string, settings: {

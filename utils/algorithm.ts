@@ -60,31 +60,47 @@ export const runPlacementAlgorithm = (
     togetherMap.get(id2)!.add(id1);
   };
 
-  // 1. Twins Logic (분리 vs 같은 반 선택 반영)
-  const twinsByDob: Record<string, Student[]> = {};
-  students.filter(s => s.쌍둥이).forEach(s => {
-    const key = s.생년월일 || 'unknown';
-    if (!twinsByDob[key]) twinsByDob[key] = [];
-    twinsByDob[key].push(s);
-  });
-  Object.values(twinsByDob).forEach(group => {
-    if (group.length > 1) {
-      // 그룹 중 '동일'(같은 반) 희망이 있는지 확인
-      const wantSameClass = group.some(s => s.쌍둥이옵션 === '동일');
-
-      for (let i = 0; i < group.length; i++) {
-        for (let j = i + 1; j < group.length; j++) {
-          if (wantSameClass) {
-            // 같은 반 희망: togetherMap에 등록하여 반드시 동반 배정
-            addTogether(group[i].id, group[j].id);
+  // 1. Twins Logic
+  // 🌟 settings.twinGroups가 명시적으로 지정된 경우: 생년월일/이름/성씨 추정 완전 배제, 명시적 그룹 ID 쌍만 반영
+  if (settings.twinGroups && settings.twinGroups.length > 0) {
+    settings.twinGroups.forEach(group => {
+      const ids = group.studentIds || [];
+      if (ids.length < 2) return;
+      for (let i = 0; i < ids.length; i++) {
+        for (let j = i + 1; j < ids.length; j++) {
+          if (group.option === '동일') {
+            addTogether(ids[i], ids[j]);
           } else {
-            // 분리 희망 (기본값): conflictMap에 등록하여 서로 다른 반 배정
-            addConflict(group[i].id, group[j].id);
+            addConflict(ids[i], ids[j]);
           }
         }
       }
-    }
-  });
+    });
+  } else {
+    // 기존 단독 모드 등 twinGroups가 전달되지 않았을 때의 하위 호환 로직
+    const twinsByDob: Record<string, Student[]> = {};
+    students.filter(s => s.쌍둥이).forEach(s => {
+      const key = s.생년월일 || 'unknown';
+      if (!twinsByDob[key]) twinsByDob[key] = [];
+      twinsByDob[key].push(s);
+    });
+    Object.values(twinsByDob).forEach(group => {
+      if (group.length > 1) {
+        // 그룹 중 '동일'(같은 반) 희망이 있는지 확인
+        const wantSameClass = group.some(s => s.쌍둥이옵션 === '동일');
+
+        for (let i = 0; i < group.length; i++) {
+          for (let j = i + 1; j < group.length; j++) {
+            if (wantSameClass) {
+              addTogether(group[i].id, group[j].id);
+            } else {
+              addConflict(group[i].id, group[j].id);
+            }
+          }
+        }
+      }
+    });
+  }
 
   // 2. Separation Request Logic
   const studentLookup: Record<string, Student[]> = {};

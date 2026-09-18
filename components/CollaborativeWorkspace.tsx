@@ -2,16 +2,16 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Users, ShieldCheck, Crown, UserCheck, Key, LogOut, CheckCircle2, Settings, AlertOctagon, 
   Clock, Upload, Plus, Trash2, ArrowRight, ArrowLeft, RefreshCw, 
-  Layers, Sparkles, Copy, Check, Download, AlertTriangle, FileSpreadsheet, Lock
+  Layers, Sparkles, Copy, Check, Download, AlertTriangle, FileSpreadsheet, Lock, X
 } from 'lucide-react';
-import { Student, ClassSettings, PlacementResult } from '../types';
+import { Student, ClassSettings, PlacementResult, TwinGroupConfig } from '../types';
 import { 
   createWorkspace, subscribeWorkspace, updateClassStudents, 
   executeWorkspacePlacement, updateWorkspaceResult, resetWorkspaceToInput, 
   updateWorkspaceSettings, deleteWorkspace, ensureAnonymousUser, getOwnMembership,
   subscribeOwnMembership, requestRoomMembership, subscribeOwnRequest, subscribeJoinRequests,
   approveJoinRequest, cancelJoinRequest, restoreCreatorMembership, CollaborationWorkspace, RoomMember, JoinRequest,
-  issueAdminRecoveryCode, recoverWorkspaceAdmin, AdminRecoveryCode 
+  issueAdminRecoveryCode, recoverWorkspaceAdmin, AdminRecoveryCode, updateWorkspaceTwinGroups
 } from '../firebase';
 import { parseExcel, generateTemplate, downloadResultsByNewClass, downloadResultsByOldClass } from '../utils/excel';
 import { runPlacementAlgorithm } from '../utils/algorithm';
@@ -72,6 +72,9 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
   const [filterSpecialOnly, setFilterSpecialOnly] = useState<boolean>(false);
   const [swapCandidate, setSwapCandidate] = useState<Student | null>(null);
 
+  // 5-1. 명시적 쌍둥이 그룹 설정 상태 (관리자가 확정한 TwinGroupConfig 목록)
+  const [twinGroups, setTwinGroups] = useState<TwinGroupConfig[]>([]);
+
   // 6. 단일 학생 추가 임시 폼
   const [showAddStudentModal, setShowAddStudentModal] = useState<boolean>(false);
   const [newStudent, setNewStudent] = useState<Partial<Student>>({
@@ -107,6 +110,7 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
     setIsHost(false);
     setPendingRequest(null);
     setJoinRequests({});
+    setTwinGroups([]);
     if (!currentCode || !firebaseUid) return;
     let stopRoom: (() => void) | undefined;
     let stopRequests: (() => void) | undefined;
@@ -139,6 +143,13 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
     const stopRequest = subscribeOwnRequest(currentCode, firebaseUid, setPendingRequest, onError);
     return () => { stopMember(); stopRequest(); stopRoom?.(); stopRequests?.(); };
   }, [currentCode, firebaseUid]);
+
+  // workspace의 twinGroups가 변경되면 로컬 상태 동기화
+  useEffect(() => {
+    if (workspace?.twinGroups && Array.isArray(workspace.twinGroups)) {
+      setTwinGroups(workspace.twinGroups);
+    }
+  }, [workspace?.twinGroups]);
 
   // 링크 복사
   const handleCopyInviteLink = () => {
@@ -446,6 +457,174 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
     } catch (err: any) { alert('학생 명단 저장 실패: ' + err.message); return; }
   };
 
+  // 👶 쌍둥이 후보 학생 목록 (각 반 담임교사가 '쌍둥이: true'로 등록한 전체 학생)
+  const allTwinCandidates = (workspace?.students || []).filter(s => s.쌍둥이);
+
+  // 현재 어떤 쌍둥이 그룹에든 배정된 학생 ID 집합
+  const assignedTwinStudentIds = new Set<number>();
+  twinGroups.forEach(g => {
+    (g.studentIds || []).forEach(id => assignedTwinStudentIds.add(id));
+  });
+
+  // 아직 어떤 그룹에도 지정되지 않은 미배정 쌍둥이 후보 학생 목록
+  const unassignedTwinCandidates = allTwinCandidates.filter(s => !assignedTwinStudentIds.has(s.id));
+
+  // 👶 쌍둥이 그룹 설정 저장 헬퍼 (RTDB 영속 저장 + 실패 시 명확한 오류 표시 및 롤백)
+  const saveTwinGroupsState = async (newGroups: TwinGroupConfig[]) => {
+    if (!workspace) return false;
+    const previousGroups = twinGroups;
+    // UI에 즉시 반영
+    setTwinGroups(newGroups);
+    try {
+      await updateWorkspaceTwinGroups(workspace.code, newGroups);
+      return true;
+    } catch (err: any) {
+      // 영속 저장 실패 시 이전 상태로 롤백하고 관리자에게 명확하게 오류 표시
+      setTwinGroups(previousGroups);
+      alert(`⚠️ 쌍둥이 그룹 설정 저장에 실패했습니다.\n\n오류 내용: ${err.message || '데이터베이스 저장 실패'}\n설정이 저장되지 않았으므로 이전 상태로 복원됩니다.`);
+      console.error('RTDB twinGroups 저장 실패:', err);
+      return false;
+    }
+  };
+
+  // 👶 관리자 전용: 새 빈 쌍둥이 그룹 추가
+  const handleCreateTwinGroup = async () => {
+    if (!isHost) return;
+    const newGroupId = `twin-group-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const newGroup: TwinGroupConfig = {
+      id: newGroupId,
+      studentIds: [],
+      option: '분리'
+    };
+    await saveTwinGroupsState([...twinGroups, newGroup]);
+  };
+
+  // 👶 관리자 전용: 쌍둥이 그룹 삭제
+  const handleDeleteTwinGroup = async (groupId: string) => {
+    if (!isHost) return;
+    const updated = twinGroups.filter(g => g.id !== groupId);
+    await saveTwinGroupsState(updated);
+  };
+
+  // 👶 관리자 전용: 특정 그룹에 학생 추가
+  const handleAddStudentToGroup = async (groupId: string, studentId: number) => {
+    if (!isHost || !studentId) return;
+    const updated = twinGroups.map(g => {
+      if (g.id === groupId) {
+        if (g.studentIds.includes(studentId)) return g;
+        return { ...g, studentIds: [...g.studentIds, studentId] };
+      }
+      return g;
+    });
+    await saveTwinGroupsState(updated);
+  };
+
+  // 👶 관리자 전용: 특정 그룹에서 학생 제거
+  const handleRemoveStudentFromGroup = async (groupId: string, studentId: number) => {
+    if (!isHost) return;
+    const updated = twinGroups.map(g => {
+      if (g.id === groupId) {
+        return { ...g, studentIds: g.studentIds.filter(id => id !== studentId) };
+      }
+      return g;
+    });
+    await saveTwinGroupsState(updated);
+  };
+
+  // 👶 관리자 전용: 특정 그룹의 배정 옵션 변경 (분리 vs 동일)
+  const handleToggleGroupOption = async (groupId: string, option: '분리' | '동일') => {
+    if (!isHost) return;
+    const updated = twinGroups.map(g => {
+      if (g.id === groupId) {
+        return { ...g, option };
+      }
+      return g;
+    });
+    await saveTwinGroupsState(updated);
+  };
+
+  // 👶 관리자 전용: 생년월일 기준 자동 초안 생성 편의 기능
+  const handleDraftGroupsFromDob = async () => {
+    if (!isHost) return;
+    const twinsByDob: Record<string, Student[]> = {};
+    allTwinCandidates.forEach(s => {
+      const key = s.생년월일?.trim() || `미입력_${s.id}`;
+      if (!twinsByDob[key]) twinsByDob[key] = [];
+      twinsByDob[key].push(s);
+    });
+
+    const draftedGroups: TwinGroupConfig[] = [];
+    let groupIndex = 1;
+    Object.entries(twinsByDob).forEach(([key, members]) => {
+      if (members.length > 1 && !key.startsWith('미입력_')) {
+        draftedGroups.push({
+          id: `twin-group-${Date.now()}-${groupIndex++}`,
+          studentIds: members.map(m => m.id),
+          option: '분리'
+        });
+      }
+    });
+
+    if (draftedGroups.length === 0) {
+      alert('생년월일이 정확히 일치하는 쌍둥이 후보 학생이 2명 이상 발견되지 않았습니다.\n수동으로 [+ 새 쌍둥이 그룹 만들기]를 눌러 학생을 지정해주세요.');
+      return;
+    }
+
+    const totalDraftStudents = draftedGroups.reduce((acc, g) => acc + g.studentIds.length, 0);
+    const confirmMsg = `생년월일이 일치하는 ${draftedGroups.length}개 그룹(총 ${totalDraftStudents}명)의 초안을 생성하시겠습니까?\n\n※ 기존 설정된 그룹이 있다면 초안으로 교체됩니다. 생성 후 학생 추가/제거 및 옵션 변경이 가능합니다.`;
+    if (!window.confirm(confirmMsg)) return;
+
+    await saveTwinGroupsState(draftedGroups);
+  };
+
+  // 👶 배정 실행 전 쌍둥이 그룹 유효성 검사
+  const validateTwinGroupsForPlacement = (): boolean => {
+    if (!workspace) return false;
+
+    // 1. 그룹별 최소 인원 검증 (그룹이 존재하면 2명 이상이어야 함)
+    for (let i = 0; i < twinGroups.length; i++) {
+      const g = twinGroups[i];
+      if (g.studentIds.length < 2) {
+        alert(`⚠️ [쌍둥이 그룹 ${i + 1}]에 학생이 2명 이상 지정되어야 합니다.\n학생을 추가하거나 비어있는 그룹을 삭제해주세요.`);
+        return false;
+      }
+    }
+
+    // 2. 학생 중복 소속 검증
+    const seenIds = new Set<number>();
+    for (let i = 0; i < twinGroups.length; i++) {
+      const g = twinGroups[i];
+      for (const sid of g.studentIds) {
+        if (seenIds.has(sid)) {
+          const st = workspace.students.find(s => s.id === sid);
+          alert(`⚠️ 학생 [${st?.현학급 || ''}반 ${st?.이름 || sid}]이 여러 쌍둥이 그룹에 중복 소속되어 있습니다.\n확인 후 수정해주세요.`);
+          return false;
+        }
+        seenIds.add(sid);
+      }
+    }
+
+    // 3. 분리 배정 가능 여부 검증 (진급할 학급 수 초과 여부)
+    for (let i = 0; i < twinGroups.length; i++) {
+      const g = twinGroups[i];
+      if (g.option === '분리' && g.studentIds.length > workspace.nextClassCount) {
+        alert(`⚠️ [쌍둥이 그룹 ${i + 1}]의 학생 수(${g.studentIds.length}명)가 진급할 학급 수(${workspace.nextClassCount}개 반)보다 많아 모두 분리 배정할 수 없습니다.\n배정 방식을 '같은 반'으로 변경하거나 학급 수를 확인해주세요.`);
+        return false;
+      }
+    }
+
+    // 4. 미지정 쌍둥이 후보 학생 확인 안내
+    if (unassignedTwinCandidates.length > 0) {
+      const names = unassignedTwinCandidates.map(s => `${s.현학급}반 ${s.이름}`).join(', ');
+      const proceed = window.confirm(
+        `⚠️ 아직 쌍둥이 그룹에 지정되지 않은 쌍둥이 표시 학생이 ${unassignedTwinCandidates.length}명 있습니다:\n(${names})\n\n이 학생들은 쌍둥이 제약 없이 일반 학생과 동일하게 배정됩니다.\n그래도 학급편성을 계속 진행하시겠습니까?`
+      );
+      if (!proceed) return false;
+    }
+
+    return true;
+  };
+
   // 👑 관리자 전용: 배정 알고리즘 실행
   const handleRunCollabPlacement = async () => {
     if (!workspace) return;
@@ -473,6 +652,11 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
       if (!confirmContinue) return;
     }
 
+    // 쌍둥이 그룹 유효성 검증
+    if (!validateTwinGroupsForPlacement()) {
+      return;
+    }
+
     setLoading(true);
     try {
       const settings: ClassSettings = {
@@ -480,7 +664,8 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
         nextClassCount: workspace.nextClassCount,
         normalCapacity: Math.ceil(workspace.students.length / workspace.nextClassCount),
         reductionCount: workspace.reductionCount,
-        placementOrder: workspace.placementOrder
+        placementOrder: workspace.placementOrder,
+        twinGroups: twinGroups.length > 0 ? twinGroups : undefined
       };
 
       const placementResult = runPlacementAlgorithm(workspace.students, settings);
@@ -848,61 +1033,61 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
     <div className="max-w-7xl mx-auto py-1 space-y-4">
       {recoveryDialog}
       {/* 헤더 바 */}
-      <div className="bg-white border border-blue-100 rounded-2xl p-5 shadow-none flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-xl shadow-none shadow-none">
+      <div className="bg-white border border-[#dce7f3] rounded-2xl p-4 sm:p-5 shadow-[0_1px_3px_rgba(20,65,120,0.04)] flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-3 sm:gap-4">
+          <div className="w-10 h-10 rounded-xl bg-blue-50 text-[#1677ed] border border-blue-100/80 flex items-center justify-center font-extrabold text-lg shrink-0">
             {workspace.name.slice(0, 1)}
           </div>
           <div>
-            <div className="flex flex-wrap items-center gap-2.5">
-              <h2 className="text-xl font-bold tracking-tight text-[#071747]">{workspace.name}</h2>
-              <span className="font-mono bg-slate-100 text-slate-700 text-xs px-2.5 py-0.5 rounded-lg font-bold border border-blue-100">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
+              <h2 className="text-lg sm:text-xl font-extrabold tracking-tight text-[#071747]">{workspace.name}</h2>
+              <span className="font-mono bg-[#f8fbff] text-[#172b4d] text-xs px-2.5 py-0.5 rounded-lg font-bold border border-[#dce7f3]">
                 코드: {workspace.code}
               </span>
               <button
                 onClick={handleCopyInviteLink}
-                className="text-xs text-blue-600 hover:text-blue-800 font-bold flex items-center gap-1 bg-blue-50 px-2 py-0.5 rounded-md cursor-pointer transition"
+                className="text-xs text-[#1677ed] hover:text-[#0b65d4] font-semibold flex items-center gap-1 bg-blue-50/80 hover:bg-blue-100/70 border border-blue-100 px-2 py-0.5 rounded-lg cursor-pointer transition shadow-none"
                 title="초대 링크 복사"
               >
                 {copiedLink ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
                 {copiedLink ? '복사됨!' : '초대링크 복사'}
               </button>
             </div>
-            <div className="flex items-center gap-3 mt-1 text-xs text-slate-500">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3 mt-1 text-xs text-[#58708f]">
               <span>현재 {workspace.currentClassCount}개 학급</span>
               <span>•</span>
               <span>편성 예정 {workspace.nextClassCount}개 학급</span>
               <span>•</span>
-              <span className="font-semibold text-blue-600">총 취합 {totalStudentsCount}명</span>
+              <span className="font-semibold text-[#1677ed]">총 취합 {totalStudentsCount}명</span>
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
           {isHost ? (
             <>
-              <span className="bg-blue-50 border border-blue-100 text-blue-700 text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5 shadow-none">
-                <Crown size={14} className="text-blue-600" /> 학년부장 (관리자)
+              <span className="bg-blue-50/80 border border-blue-100 text-[#1677ed] text-xs font-semibold px-3 py-1.5 rounded-xl flex items-center gap-1.5 shadow-none">
+                <Crown size={14} className="text-[#1677ed]" /> 학년부장 (관리자)
               </span>
               <button
                 onClick={handleIssueRecoveryCode}
                 disabled={recoveryBusy || loading}
-                className="flex items-center gap-1.5 rounded-xl border border-blue-100 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+                className="flex items-center gap-1.5 rounded-xl border border-[#dce7f3] bg-white hover:bg-blue-50/70 px-3 py-1.5 text-xs font-semibold text-[#172b4d] transition-colors disabled:opacity-50"
               >
-                <Key size={13} /> {recoveryBusy ? '처리 중...' : '복구 코드 발급/재발급'}
+                <Key size={13} className="text-slate-500" /> {recoveryBusy ? '처리 중...' : '복구 코드 발급/재발급'}
               </button>
               <button
                 onClick={handleOpenSettingsModal}
-                className="bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 cursor-pointer border border-blue-100"
+                className="bg-white hover:bg-blue-50/70 text-[#172b4d] text-xs font-semibold px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 cursor-pointer border border-[#dce7f3]"
                 title="학급 수 변경, 학년명 수정 및 방 관리"
               >
-                <Settings size={13} /> 학년 설정 수정
+                <Settings size={13} className="text-slate-500" /> 학년 설정 수정
               </button>
               <button
                 type="button"
                 onClick={() => { handleOpenSettingsModal(); setShowDeleteConfirm(true); }}
                 disabled={loading || recoveryBusy}
-                className="flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2"
+                className="flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50/80 hover:bg-rose-100/70 px-3 py-1.5 text-xs font-semibold text-rose-700 transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2"
               >
                 <Trash2 size={13} /> 방 삭제
               </button>
@@ -910,16 +1095,16 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
           ) : (
             <button
               onClick={() => setShowAdminAuthModal(true)}
-              className="bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-800 text-xs font-bold px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 cursor-pointer transition shadow-none"
+              className="bg-white hover:bg-blue-50/70 border border-[#dce7f3] text-[#172b4d] text-xs font-semibold px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 cursor-pointer transition shadow-none"
               title="현재 계정의 권한 안내를 확인합니다"
             >
-              <Crown size={13} className="text-blue-600" /> 계정 권한 안내
+              <Crown size={13} className="text-[#1677ed]" /> 계정 권한 안내
             </button>
           )}
 
           <button
             onClick={handleLeaveRoom}
-            className="text-xs font-bold text-slate-500 hover:text-rose-600 bg-slate-50 hover:bg-rose-50 px-3 py-1.5 rounded-xl border border-blue-100 hover:border-rose-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 cursor-pointer flex items-center gap-1"
+            className="text-xs font-semibold text-[#58708f] hover:text-rose-600 bg-white hover:bg-rose-50/80 px-3 py-1.5 rounded-xl border border-[#dce7f3] hover:border-rose-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 cursor-pointer flex items-center gap-1"
           >
             <LogOut size={13} /> 방 나가기
           </button>
@@ -1159,18 +1344,18 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
       ) : (
         /* STEP 1 & 2: 학생 입력 및 취합 단계 */
         <div className="space-y-4">
-          <div className="flex flex-wrap items-center gap-2 border-b border-blue-100 pb-3">
+          <div className="flex flex-wrap items-center gap-2 border-b border-[#dce7f3] pb-3">
             <button
               onClick={() => setActiveClassTab(0)}
-              className={`px-4 py-2.5 rounded-2xl text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 cursor-pointer flex flex-wrap items-center gap-2 ${
+              className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 cursor-pointer flex items-center gap-2 ${
                 activeClassTab === 0
-                  ? 'bg-blue-600 text-white shadow-none shadow-none'
-                  : 'bg-white text-slate-600 hover:bg-slate-100 border border-blue-100'
+                  ? 'bg-[#1677ed] text-white shadow-sm border border-[#1677ed]'
+                  : 'bg-white text-[#354c75] hover:bg-blue-50/70 hover:text-[#1677ed] border border-[#dce7f3]'
               }`}
             >
-              <Layers size={15} /> ⭐ 전체 취합 현황판
-              <span className={`px-2 py-0.5 rounded-full text-[10px] ${
-                activeClassTab === 0 ? 'bg-blue-700 text-white' : 'bg-slate-100 text-slate-600'
+              <Layers size={14} /> <span>전체 취합 현황판</span>
+              <span className={`px-2 py-0.5 rounded-md text-[11px] font-bold ${
+                activeClassTab === 0 ? 'bg-white/20 text-white' : 'bg-slate-100 text-[#58708f]'
               }`}>
                 {totalStudentsCount}명
               </span>
@@ -1185,20 +1370,20 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
                 <button
                   key={classNum}
                   onClick={() => setActiveClassTab(classNum)}
-                  className={`px-4 py-2.5 rounded-2xl text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 cursor-pointer flex flex-wrap items-center gap-2 ${
+                  className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 cursor-pointer flex items-center gap-1.5 ${
                     isCurrent
-                      ? 'bg-slate-900 text-white shadow-none'
-                      : 'bg-white text-slate-700 hover:bg-slate-100 border border-blue-100'
+                      ? 'bg-[#1677ed] text-white shadow-sm border border-[#1677ed]'
+                      : 'bg-white text-[#354c75] hover:bg-blue-50/70 hover:text-[#1677ed] border border-[#dce7f3]'
                   }`}
                 >
                   <span>{classNum}반</span>
-                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono ${
-                    isCurrent ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-600'
+                  <span className={`px-1.5 py-0.5 rounded-md text-[11px] font-mono ${
+                    isCurrent ? 'bg-white/20 text-white' : 'bg-slate-100 text-[#58708f]'
                   }`}>
                     {count}명
                   </span>
                   {isCompleted && (
-                    <CheckCircle2 size={13} className={isCurrent ? 'text-emerald-300' : 'text-emerald-600'} />
+                    <CheckCircle2 size={13} className={isCurrent ? 'text-emerald-200' : 'text-emerald-600'} />
                   )}
                 </button>
               );
@@ -1221,49 +1406,264 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
                     <div
                       key={classNum}
                       onClick={() => setActiveClassTab(classNum)}
-                      className={`bg-white border rounded-2xl p-5 shadow-none transition shadow-none cursor-pointer relative overflow-hidden ${
-                        isCompleted ? 'border-emerald-200 hover:border-emerald-300' : 'border-blue-100 hover:border-blue-200'
+                      className={`group bg-white border rounded-2xl p-4 sm:p-5 shadow-[0_1px_3px_rgba(20,65,120,0.04)] hover:shadow-[0_4px_12px_rgba(20,65,120,0.08)] transition-all cursor-pointer relative overflow-hidden flex flex-col justify-between ${
+                        isCompleted ? 'border-emerald-200 hover:border-emerald-300' : 'border-[#dce7f3] hover:border-[#1677ed]'
                       }`}
                     >
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center font-bold text-[#172b4d] text-sm">
-                            {classNum}
-                          </span>
-                          <span className="text-xs font-bold text-slate-700">{teacher}</span>
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="w-8 h-8 rounded-xl bg-blue-50/80 border border-blue-100 flex items-center justify-center font-bold text-[#071747] text-sm shrink-0">
+                              {classNum}
+                            </span>
+                            <span className="text-xs font-bold text-[#071747] truncate" title={teacher}>{teacher}</span>
+                          </div>
+                          {isCompleted ? (
+                            <span className="bg-emerald-50 text-emerald-700 border border-emerald-200/70 text-[11px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1 shrink-0">
+                              <CheckCircle2 size={12} /> 입력완료
+                            </span>
+                          ) : (
+                            <span className="bg-amber-50 text-amber-700 border border-amber-200/70 text-[11px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1 shrink-0">
+                              <Clock size={12} /> 작성중
+                            </span>
+                          )}
                         </div>
-                        {isCompleted ? (
-                          <span className="bg-emerald-50 text-emerald-700 text-[11px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1">
-                            <CheckCircle2 size={12} /> 입력완료
-                          </span>
-                        ) : (
-                          <span className="bg-amber-50 text-amber-700 text-[11px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1">
-                            <Clock size={12} /> 작성중
-                          </span>
-                        )}
+
+                        <div className="flex items-baseline gap-1.5 mb-3">
+                          <span className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[#071747]">{classStudents.length}</span>
+                          <span className="text-xs font-medium text-[#58708f]">명 등록됨</span>
+                        </div>
                       </div>
 
-                      <div className="flex items-baseline gap-2 mb-3">
-                        <span className="text-3xl font-bold text-[#172b4d]">{classStudents.length}</span>
-                        <span className="text-xs text-slate-500">명 등록됨</span>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-1.5 text-[11px] text-slate-600 bg-slate-50 rounded-xl p-2.5">
-                        <div>남 {maleCount} / 여 {femaleCount}</div>
-                        <div>특수: {integratedCount}명</div>
-                        <div>생활(상): {guidanceHigh}명</div>
-                        <div className="text-blue-600 font-bold">클릭하여 편집 ➔</div>
+                      <div className="grid grid-cols-2 gap-1.5 text-[11px] text-[#354c75] bg-[#f8fbff] border border-[#e2ecf7] rounded-xl p-2.5">
+                        <div>남 <strong className="text-[#1677ed]">{maleCount}</strong> / 여 <strong className="text-pink-600">{femaleCount}</strong></div>
+                        <div>특수: <strong className={integratedCount > 0 ? "text-emerald-700" : ""}>{integratedCount}명</strong></div>
+                        <div>생활(상): <strong className={guidanceHigh > 0 ? "text-rose-600" : ""}>{guidanceHigh}명</strong></div>
+                        <div className="text-[#1677ed] font-semibold group-hover:underline text-right">클릭하여 편집 ➔</div>
                       </div>
                     </div>
                   );
                 })}
               </div>
 
-              <div className="bg-white border border-blue-100 rounded-2xl p-5 sm:p-6 shadow-none">
+              {/* 👶 쌍둥이/다둥이 그룹 매칭 및 배정 설정 섹션 (명시적 그룹 매칭 방식) */}
+              {(allTwinCandidates.length > 0 || twinGroups.length > 0) && (
+                <div className="rounded-2xl border border-[#dce7f3] bg-white p-5 sm:p-6 shadow-[0_1px_3px_rgba(20,65,120,0.04)]">
+                  <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="text-base sm:text-lg font-bold text-[#071747] flex items-center">
+                          <Users className="w-5 h-5 mr-2 text-[#1677ed] shrink-0" />
+                          👶 쌍둥이/다둥이 그룹 매칭 및 배정 설정
+                        </h3>
+                        <span className="bg-blue-50 text-[#1677ed] border border-blue-100 text-xs font-semibold px-2.5 py-0.5 rounded-full">
+                          후보 {allTwinCandidates.length}명 / 그룹 {twinGroups.length}개
+                        </span>
+                      </div>
+                      <p className="text-xs text-[#58708f] mt-1.5 leading-relaxed">
+                        각 반 담임교사가 등록한 쌍둥이 후보 학생들을 실제 관계별로 명시적으로 묶고, 분리/동반 배정 방식을 설정합니다.
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      {isHost ? (
+                        <>
+                          <button
+                            type="button"
+                            disabled={loading || allTwinCandidates.length === 0}
+                            onClick={handleDraftGroupsFromDob}
+                            className="px-3.5 py-2 bg-[#f0f6ff] hover:bg-[#e1eeff] text-[#1677ed] border border-blue-200 text-xs font-semibold rounded-xl transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer flex items-center gap-1.5 shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="동일한 생년월일을 가진 학생끼리 자동으로 초안 그룹을 생성합니다."
+                          >
+                            <Sparkles size={14} />
+                            <span>생년월일 기준 초안 생성</span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={loading}
+                            onClick={handleCreateTwinGroup}
+                            className="px-3.5 py-2 bg-[#1677ed] hover:bg-[#1260c4] text-white text-xs font-semibold rounded-xl transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer flex items-center gap-1.5 shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <Plus size={14} />
+                            <span>새 그룹 추가</span>
+                          </button>
+                        </>
+                      ) : (
+                        <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-xl font-medium flex items-center gap-1.5">
+                          <Lock size={14} /> 학년부장(관리자)만 그룹을 매칭/수정할 수 있습니다
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 미지정 쌍둥이 후보 알림 배너 */}
+                  {unassignedTwinCandidates.length > 0 && (
+                    <div className="mb-5 p-3.5 bg-amber-50/80 border border-amber-200 rounded-xl text-xs text-amber-800 flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <AlertTriangle size={16} className="text-amber-600 shrink-0" />
+                        <span>
+                          <strong>미지정 쌍둥이 후보 ({unassignedTwinCandidates.length}명):</strong> 아직 그룹에 배정되지 않은 학생은 쌍둥이 제약 없이 일반 배정됩니다.
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {unassignedTwinCandidates.map(s => (
+                          <span key={s.id} className="bg-white/90 border border-amber-200 text-amber-900 px-2 py-0.5 rounded-md font-semibold text-[11px]">
+                            {s.현학급}반 {s.이름} ({s.성별})
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 그룹 목록 그리드 */}
+                  {twinGroups.length === 0 ? (
+                    <div className="border border-dashed border-[#dce7f3] rounded-2xl p-8 text-center bg-[#fafcff]">
+                      <Users className="w-8 h-8 mx-auto text-slate-400 mb-2 opacity-60" />
+                      <p className="text-sm font-semibold text-[#354c75]">생성된 쌍둥이 그룹이 없습니다.</p>
+                      <p className="text-xs text-[#58708f] mt-1">
+                        {isHost
+                          ? '상단의 [새 그룹 추가] 또는 [생년월일 기준 초안 생성]을 눌러 쌍둥이 학생들을 매칭해주세요.'
+                          : '학년부장(관리자) 선생님께서 쌍둥이 그룹을 매칭 중입니다.'}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="grid md:grid-cols-2 gap-4">
+                      {twinGroups.map((group, gIdx) => {
+                        const isSameClass = group.option === '동일';
+                        const groupMembers = (group.studentIds || [])
+                          .map(id => workspace.students.find(s => s.id === id))
+                          .filter((s): s is Student => !!s);
+
+                        return (
+                          <div key={group.id} className="p-4 bg-[#f8fbff] rounded-2xl border border-[#dce7f3] flex flex-col justify-between">
+                            <div>
+                              <div className="flex items-center justify-between mb-2.5">
+                                <div className="flex items-center gap-2">
+                                  <span className="w-6 h-6 rounded-lg bg-[#1677ed] text-white flex items-center justify-center text-xs font-bold shadow-xs">
+                                    {gIdx + 1}
+                                  </span>
+                                  <span className="text-sm font-bold text-[#071747]">
+                                    쌍둥이 그룹 #{gIdx + 1}
+                                  </span>
+                                  <span className={`text-xs px-2 py-0.5 rounded-full font-semibold border ${
+                                    groupMembers.length >= 2
+                                      ? 'bg-blue-50 text-[#1677ed] border-blue-200'
+                                      : 'bg-rose-50 text-rose-600 border-rose-200'
+                                  }`}>
+                                    {groupMembers.length}명
+                                  </span>
+                                </div>
+
+                                {isHost && (
+                                  <button
+                                    type="button"
+                                    disabled={loading}
+                                    onClick={() => handleDeleteTwinGroup(group.id)}
+                                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                    title="이 쌍둥이 그룹 삭제"
+                                  >
+                                    <Trash2 size={15} />
+                                  </button>
+                                )}
+                              </div>
+
+                              {/* 소속 학생 칩 목록 */}
+                              <div className="min-h-[42px] p-2.5 bg-white rounded-xl border border-[#e2ecf7] mb-3">
+                                {groupMembers.length === 0 ? (
+                                  <div className="text-xs text-slate-400 italic py-1 text-center">
+                                    지정된 학생이 없습니다. 아래에서 학생을 추가해주세요.
+                                  </div>
+                                ) : (
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {groupMembers.map(m => (
+                                      <span
+                                        key={m.id}
+                                        className="inline-flex items-center gap-1.5 bg-[#f0f6ff] text-[#1677ed] border border-blue-200 px-2.5 py-1 rounded-full text-xs font-semibold shadow-xs"
+                                      >
+                                        <span>{m.현학급}반 {m.이름} ({m.성별})</span>
+                                        {isHost && (
+                                          <button
+                                            type="button"
+                                            disabled={loading}
+                                            onClick={() => handleRemoveStudentFromGroup(group.id, m.id)}
+                                            className="hover:bg-blue-200/70 p-0.5 rounded-full text-[#1677ed] transition-colors cursor-pointer"
+                                            title="그룹에서 제외"
+                                          >
+                                            <X size={12} />
+                                          </button>
+                                        )}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* 학생 추가 셀렉트 박스 (관리자 전용) */}
+                              {isHost && unassignedTwinCandidates.length > 0 && (
+                                <div className="mb-3">
+                                  <select
+                                    disabled={loading}
+                                    defaultValue=""
+                                    onChange={(e) => {
+                                      const sid = Number(e.target.value);
+                                      if (sid) {
+                                        handleAddStudentToGroup(group.id, sid);
+                                        e.target.value = '';
+                                      }
+                                    }}
+                                    className="w-full text-xs border border-[#dce7f3] bg-white rounded-xl py-1.5 px-2.5 text-[#354c75] focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                                  >
+                                    <option value="" disabled>+ 미지정 쌍둥이 학생 추가 선택...</option>
+                                    {unassignedTwinCandidates.map(s => (
+                                      <option key={s.id} value={s.id}>
+                                        {s.현학급}반 {s.이름} ({s.성별}, 생년월일: {s.생년월일 || '미입력'})
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* 분리 vs 동일 배정 방식 선택 토글 */}
+                            <div className="grid grid-cols-2 gap-2 mt-2 pt-2 border-t border-[#e2ecf7]">
+                              <button
+                                type="button"
+                                disabled={!isHost || loading}
+                                onClick={() => handleToggleGroupOption(group.id, '분리')}
+                                className={`py-2 px-3 rounded-xl border text-xs font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-80 disabled:cursor-not-allowed ${
+                                  !isSameClass
+                                    ? 'bg-[#1677ed] border-[#1677ed] text-white shadow-xs'
+                                    : 'bg-white text-[#354c75] border-[#dce7f3] hover:bg-blue-50/70 hover:text-[#1677ed]'
+                                }`}
+                              >
+                                <span>🚫 다른 반 (분리)</span>
+                              </button>
+                              <button
+                                type="button"
+                                disabled={!isHost || loading}
+                                onClick={() => handleToggleGroupOption(group.id, '동일')}
+                                className={`py-2 px-3 rounded-xl border text-xs font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-80 disabled:cursor-not-allowed ${
+                                  isSameClass
+                                    ? 'bg-[#1677ed] border-[#1677ed] text-white shadow-xs'
+                                    : 'bg-white text-[#354c75] border-[#dce7f3] hover:bg-blue-50/70 hover:text-[#1677ed]'
+                                }`}
+                              >
+                                <span>🤝 같은 반 (동반)</span>
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="bg-white border border-[#dce7f3] rounded-2xl p-5 sm:p-6 shadow-[0_1px_3px_rgba(20,65,120,0.04)]">
                 <div className="flex flex-wrap items-center justify-between gap-4">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2.5 py-1 rounded-full">
+                      <span className="bg-blue-50 text-[#1677ed] border border-blue-100 text-xs font-bold px-3 py-1 rounded-full">
                         취합 진행도: {completedClassesCount} / {workspace.currentClassCount} 학급 완료
                       </span>
                     </div>
@@ -1272,7 +1672,7 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
                         ? '✨ 모든 반의 입력이 완료되었습니다! 배정을 실행할 수 있습니다.'
                         : `⏳ 현재 ${workspace.currentClassCount - completedClassesCount}개 학급이 학생 명단을 입력 중입니다.`}
                     </h3>
-                    <p className="text-xs text-slate-500 mt-1">
+                    <p className="text-xs text-[#58708f] mt-1">
                       총 {totalStudentsCount}명의 학생이 취합되었으며, 배정 버튼을 누르면 모든 선생님 화면에 결과가 실시간으로 나타납니다.
                     </p>
                   </div>
@@ -1282,7 +1682,7 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
                       <button
                         onClick={handleRunCollabPlacement}
                         disabled={loading || totalStudentsCount === 0}
-                        className="px-5 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold text-base rounded-2xl shadow-none shadow-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 cursor-pointer flex flex-wrap items-center gap-2"
+                        className="px-5 py-3 bg-[#1677ed] hover:bg-[#1260c4] disabled:bg-slate-300 text-white font-bold text-sm sm:text-base rounded-xl shadow-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 cursor-pointer flex items-center gap-2"
                       >
                         <Crown size={20} />
                         {loading ? '배정 계산 중...' : '👑 학급편성 최종 실행 (관리자)'}
@@ -1302,31 +1702,31 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
             </div>
           ) : (
             <div className="space-y-4">
-              <div className="bg-white border border-blue-100 rounded-2xl p-6 shadow-none flex flex-wrap items-center justify-between gap-4">
+              <div className="bg-white border border-[#dce7f3] rounded-2xl p-5 sm:p-6 shadow-[0_1px_3px_rgba(20,65,120,0.04)] flex flex-wrap items-center justify-between gap-4">
                 <div>
                   <div className="flex flex-wrap items-center gap-2.5">
-                    <span className="w-9 h-9 rounded-2xl bg-blue-600 text-white flex items-center justify-center font-bold text-base">
+                    <span className="w-9 h-9 rounded-xl bg-[#1677ed] text-white flex items-center justify-center font-bold text-base shadow-sm">
                       {activeClassTab}
                     </span>
-                    <h3 className="text-lg font-bold text-[#172b4d]">
+                    <h3 className="text-lg font-extrabold text-[#071747]">
                       {activeClassTab}반 학생 명단 관리
                     </h3>
                     {workspace.classStatus?.[activeClassTab]?.completed ? (
-                      <span className="bg-emerald-50 text-emerald-700 text-xs font-bold px-2.5 py-1 rounded-full flex items-center gap-1 border border-emerald-100">
+                      <span className="bg-emerald-50 text-emerald-700 text-xs font-semibold px-2.5 py-1 rounded-full flex items-center gap-1 border border-emerald-200/70">
                         <CheckCircle2 size={13} /> 입력 완료됨
                       </span>
                     ) : (
-                      <span className="bg-amber-50 text-amber-700 text-xs font-bold px-2.5 py-1 rounded-full flex items-center gap-1 border border-amber-100">
+                      <span className="bg-amber-50 text-amber-700 text-xs font-semibold px-2.5 py-1 rounded-full flex items-center gap-1 border border-amber-200/70">
                         <Clock size={13} /> 작성 중
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-slate-500 mt-1">
+                  <p className="text-xs text-[#58708f] mt-1">
                     현재 {activeClassTab}반에 {currentTabStudents.length}명의 학생이 등록되어 있습니다.
                   </p>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2.5">
+                <div className="flex flex-wrap items-center gap-2">
                   <input
                     type="file"
                     ref={fileInputRef}
@@ -1338,24 +1738,24 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
                   <button
                     disabled={!canEditClass || loading}
                     onClick={() => fileInputRef.current?.click()}
-                    className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 cursor-pointer flex items-center gap-1.5 shadow-none"
+                    className="px-3.5 py-2 bg-white hover:bg-[#f8fbff] text-[#354c75] border border-[#dce7f3] text-xs font-semibold rounded-xl transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 cursor-pointer flex items-center gap-1.5 shadow-xs"
                   >
                     <Upload size={14} /> {activeClassTab}반 엑셀 업로드
                   </button>
                   <button
                     disabled={!canEditClass || loading}
                     onClick={() => setShowAddStudentModal(true)}
-                    className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 cursor-pointer flex items-center gap-1.5 shadow-none"
+                    className="px-3.5 py-2 bg-[#1677ed] hover:bg-[#1260c4] text-white text-xs font-semibold rounded-xl transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 cursor-pointer flex items-center gap-1.5 shadow-sm"
                   >
                     <Plus size={14} /> 학생 1명 추가
                   </button>
                   <button
                     disabled={!canEditClass || loading}
                     onClick={handleToggleClassComplete}
-                    className={`px-4 py-2.5 text-xs font-bold rounded-xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 cursor-pointer flex items-center gap-1.5 ${
+                    className={`px-3.5 py-2 text-xs font-semibold rounded-xl transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 cursor-pointer flex items-center gap-1.5 ${
                       workspace.classStatus?.[activeClassTab]?.completed
-                        ? 'bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-100'
-                        : 'bg-emerald-500 hover:bg-blue-600 text-white'
+                        ? 'bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200'
+                        : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm'
                     }`}
                   >
                     <CheckCircle2 size={14} />
@@ -1367,35 +1767,35 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
               </div>
 
               {currentTabStudents.length === 0 ? (
-                <div className="bg-white border border-blue-100 rounded-2xl p-6 sm:p-8 text-center">
-                  <FileSpreadsheet size={48} className="mx-auto text-slate-300 mb-4" />
-                  <h4 className="text-base font-bold text-slate-700 mb-1">
+                <div className="bg-white border border-[#dce7f3] rounded-2xl p-6 sm:p-8 text-center shadow-[0_1px_3px_rgba(20,65,120,0.04)]">
+                  <FileSpreadsheet size={44} className="mx-auto text-[#8ba2be] mb-3" />
+                  <h4 className="text-base font-bold text-[#071747] mb-1">
                     아직 {activeClassTab}반에 등록된 학생이 없습니다.
                   </h4>
-                  <p className="text-xs text-slate-500 mb-4">
+                  <p className="text-xs text-[#58708f] mb-4 max-w-md mx-auto">
                     담임선생님께서는 [엑셀 업로드] 버튼을 눌러 기존 반 학생 명단을 올리시거나 직접 추가해 주세요.
                   </p>
-                  <div className="flex justify-center gap-3">
+                  <div className="flex justify-center gap-2.5">
                     <button
                       disabled={!canEditClass || loading}
                       onClick={() => fileInputRef.current?.click()}
-                      className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl cursor-pointer"
+                      className="px-4 py-2 bg-[#1677ed] hover:bg-[#1260c4] text-white text-xs font-semibold rounded-xl transition-all shadow-sm cursor-pointer disabled:opacity-50"
                     >
                       엑셀 파일 선택
                     </button>
                     <button
                       onClick={generateTemplate}
-                      className="px-5 py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-xl cursor-pointer"
+                      className="px-4 py-2 bg-white hover:bg-[#f8fbff] text-[#354c75] border border-[#dce7f3] text-xs font-semibold rounded-xl transition-all shadow-xs cursor-pointer"
                     >
                       엑셀 서식 다운로드
                     </button>
                   </div>
                 </div>
               ) : (
-                <div className="bg-white border border-blue-100 rounded-2xl overflow-hidden shadow-none">
+                <div className="bg-white border border-[#dce7f3] rounded-2xl overflow-hidden shadow-[0_1px_3px_rgba(20,65,120,0.04)]">
                   <div className="overflow-x-auto">
                     <table className="w-full text-left text-xs">
-                      <thead className="bg-blue-50 border-b border-blue-100 text-[#172b4d] font-semibold">
+                      <thead className="bg-[#f8fbff] border-b border-[#dce7f3] text-[#071747] font-semibold">
                         <tr>
                           <th className="py-2.5 px-3 text-center w-12">번호</th>
                           <th className="py-2.5 px-3">이름</th>
@@ -1412,21 +1812,21 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
                       </thead>
                       <tbody className="divide-y divide-slate-100 text-slate-700">
                         {currentTabStudents.map((st, idx) => (
-                          <tr key={st.id} className="hover:bg-blue-50/60 transition">
-                            <td className="py-2.5 px-3 text-center font-mono text-slate-400">{st.번호 || idx + 1}</td>
-                            <td className="py-2.5 px-3 font-bold text-[#172b4d]">{st.이름}</td>
+                          <tr key={st.id} className="hover:bg-blue-50/50 transition">
+                            <td className="py-2.5 px-3 text-center font-mono text-[#58708f]">{st.번호 || idx + 1}</td>
+                            <td className="py-2.5 px-3 font-bold text-[#071747]">{st.이름}</td>
                             <td className="py-2.5 px-3 text-center">
-                              <span className={`px-2 py-0.5 rounded-md text-[11px] font-bold ${
-                                st.성별 === '남성' ? 'bg-blue-50 text-blue-600' : 'bg-rose-50 text-rose-600'
+                              <span className={`px-2 py-0.5 rounded-md text-[11px] font-semibold ${
+                                st.성별 === '남성' ? 'bg-blue-50 text-[#1677ed] border border-blue-100' : 'bg-rose-50 text-rose-600 border border-rose-100'
                               }`}>
                                 {st.성별}
                               </span>
                             </td>
                             <td className="py-2.5 px-3 text-center">
                               {st.생활지도 ? (
-                                <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
-                                  st.생활지도 === '상' ? 'bg-rose-100 text-rose-700' :
-                                  st.생활지도 === '중' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'
+                                <span className={`px-2 py-0.5 rounded-md text-[10px] font-semibold ${
+                                  st.생활지도 === '상' ? 'bg-rose-50 text-rose-700 border border-rose-200' :
+                                  st.생활지도 === '중' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-slate-100 text-slate-600'
                                 }`}>
                                   {st.생활지도}
                                 </span>
@@ -1441,7 +1841,7 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
                             <td className="py-2.5 px-3 text-center">
                               <button
                                 disabled={!canEditClass || loading}
-                      onClick={() => handleDeleteStudent(st.id)}
+                                onClick={() => handleDeleteStudent(st.id)}
                                 className="p-1 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 cursor-pointer"
                                 title="학생 삭제"
                               >
