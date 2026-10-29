@@ -111,7 +111,7 @@ export const ManualModal: React.FC<ManualModalProps> = ({ isOpen, onClose }) => 
               알고리즘의 5대 배려 기능
             </h4>
             <ul className="list-disc list-outside space-y-1 text-slate-600 text-sm bg-white border border-blue-100 rounded-xl py-3 pr-4 pl-8">
-              <li><strong>🌿 특수(통합)학급 정원 감축</strong>: 특수학생이 배치된 학급은 법정 정원(-1명~-2명)을 자동 감축하여 명시합니다.</li>
+              <li><strong>🌿 특수(통합)학급 정원 감축</strong>: 통합학급은 일반학급보다 설정한 인원만큼 적게 배정합니다. 입력 기준 인원은 전체 학생 수에 맞춰 조정되며, 나머지는 일반학급부터 배정합니다. 전출 예정 학생도 총원에 포함합니다.</li>
               <li><strong>⚖️ 생활지도 '상' 특수학급 배려</strong>: 특수학생이 있는 반에는 생활지도 '상' 배치를 최소화하는 안전 가중치가 부여됩니다.</li>
               <li><strong>👥 쌍둥이 선택권</strong>: 쌍둥이를 [분리 배정]할지 [동일 반 배정]할지 학교 방침에 맞게 선택할 수 있습니다.</li>
               <li><strong>🚩 부진 & 운동부 고른 분산</strong>: 기초학력 지원 학생과 학생선수를 전 학급에 균등하게 안배합니다.</li>

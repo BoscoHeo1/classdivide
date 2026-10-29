@@ -1,3 +1,4 @@
+import { getCapacityViolation } from './utils/capacityPlacement';
 import React, { useState, useRef, useEffect } from 'react';
 import { Upload, Download, Settings, Users, ArrowRight, CheckCircle, AlertTriangle, FileSpreadsheet, RefreshCw, Layers, Sliders, ShieldCheck, BookOpen } from 'lucide-react';
 import { Student, ClassSettings, PlacementResult } from './types';
@@ -67,6 +68,7 @@ const App: React.FC = () => {
 
   const handleRunAlgorithm = () => {
     setLoading(true);
+    setError(null);
     setTimeout(() => { // Give UI a moment to update
         try {
             const res = runPlacementAlgorithm(students, settings);
@@ -74,7 +76,7 @@ const App: React.FC = () => {
             setActiveTab(res.activeClassNames[0]);
             setStep(3);
         } catch (e) {
-            setError('알고리즘 실행 중 오류가 발생했습니다.');
+            setError(e instanceof Error ? e.message : '알고리즘 실행 중 오류가 발생했습니다.');
             console.error(e);
         } finally {
             setLoading(false);
@@ -101,6 +103,10 @@ const App: React.FC = () => {
     const target = allStudents.find(s => s.id === studentId);
     if (!target || target.배정학급 === newClassName) return;
 
+    if (result.capacityPlan) {
+      alert('목표 인원과 감축 차이를 유지하려면 한 명 이동 대신 학생 맞교환을 이용해주세요.');
+      return;
+    }
     target.배정학급 = newClassName;
 
     // 새로운 assignments 객체 생성 및 출석번호 가나다순 재부여
@@ -155,6 +161,11 @@ const App: React.FC = () => {
       const s2 = allStudents.find(s => s.id === student.id);
 
       if (s1 && s2) {
+        const proposed = { ...result.assignments,
+          [class1]: result.assignments[class1].map(s => s.id === s1.id ? s2 : s),
+          [class2]: result.assignments[class2].map(s => s.id === s2.id ? s1 : s) };
+        const violation = getCapacityViolation(result, proposed);
+        if (violation) { alert(violation); return; }
         s1.배정학급 = class2;
         s2.배정학급 = class1;
 
@@ -467,7 +478,7 @@ const App: React.FC = () => {
                             />
                         </div>
                         <div className="min-w-0 space-y-3 rounded-2xl border border-[#dce7f3] bg-white p-5 shadow-[0_1px_3px_rgba(20,65,120,0.04)]">
-                            <label className="block text-sm font-semibold text-[#172b4d]">학급당 기준 인원</label>
+                            <label className="block text-sm font-semibold text-[#172b4d]">일반학급 기준 인원 (총원에 맞춰 자동 조정)</label>
                             <input 
                                 type="number" 
                                 value={settings.normalCapacity}
@@ -660,6 +671,7 @@ const App: React.FC = () => {
                                 3단계: 결과 확인
                             </h2>
                         </div>
+                        {result.capacityPlan && <p role="status" className="rounded-xl bg-blue-50 p-4 text-sm text-blue-900">{result.capacityPlan.message}</p>}
                         {/* Stats Cards */}
                         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
                             <div className="bg-white p-4 rounded-2xl border border-[#dce7f3] shadow-[0_2px_8px_rgba(20,65,120,0.04)]">
@@ -776,7 +788,7 @@ const App: React.FC = () => {
                                                                 ? 'bg-emerald-400 text-emerald-950 ring-1 ring-white' 
                                                                 : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
                                                         }`}>
-                                                            🌿통합(-{settings.reductionCount * integratedCount})
+                                                            🌿통합(-{(integratedCount > 0 ? settings.reductionCount : 0)})
                                                         </span>
                                                     )}
                                                 </button>
@@ -863,7 +875,7 @@ const App: React.FC = () => {
                                                                     <span className="font-bold">{cStudents.length}명</span>
                                                                     {specCount > 0 && (
                                                                         <span className="text-[11px] text-emerald-600 ml-1 font-bold">
-                                                                            (🌿-{settings.reductionCount * specCount})
+                                                                            (🌿-{settings.reductionCount})
                                                                         </span>
                                                                     )}
                                                                 </td>
@@ -906,7 +918,7 @@ const App: React.FC = () => {
                                 {resultViewMode === 'newClass' && activeTab !== 'ALL' && activeTab !== 'SPECIAL_DASHBOARD' && (() => {
                                     const targetStudents = result.assignments[activeTab] || [];
                                     const integratedCount = targetStudents.filter(s => s.통합학급).length;
-                                    const totalReduction = settings.reductionCount * integratedCount;
+                                    const totalReduction = (integratedCount > 0 ? settings.reductionCount : 0);
                                     return (
                                         <div className="mb-4 space-y-2">
                                             {integratedCount > 0 && (

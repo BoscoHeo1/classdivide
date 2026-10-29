@@ -1,3 +1,4 @@
+import { getCapacityViolation } from '../utils/capacityPlacement';
 import React, { useState } from 'react';
 import { Download, FileSpreadsheet, RefreshCw, AlertTriangle, ArrowRight, Users, Layers, ShieldCheck, BookOpen, CheckCircle } from 'lucide-react';
 import { PlacementResult, Student, ClassSettings } from '../types';
@@ -86,12 +87,15 @@ export const PlacementResultDashboard: React.FC<PlacementResultDashboardProps> =
     }
 
     if (!targetStudent || oldClass === newClassName) return;
+    if (result.capacityPlan) { alert('목표 인원을 유지하려면 학생 맞교환을 이용해주세요.'); return; }
 
     const newAssignments = { ...result.assignments };
     newAssignments[oldClass] = newAssignments[oldClass].filter(s => s.id !== studentId);
     const moved = { ...targetStudent, 배정학급: newClassName };
     newAssignments[newClassName] = [...(newAssignments[newClassName] || []), moved];
 
+    const violation = getCapacityViolation(result, newAssignments);
+    if (violation) { alert(violation); return; }
     // 표준 모드와 동일하게 전출예정 학생은 뒤로, 이름 가나다순 정렬 후 번호 재부여.
     result.activeClassNames.forEach(name => {
       newAssignments[name] = (newAssignments[name] || [])
@@ -138,6 +142,8 @@ export const PlacementResultDashboard: React.FC<PlacementResultDashboardProps> =
     const newAssignments = { ...result.assignments };
     newAssignments[c1] = newAssignments[c1].map(s => s.id === first.id ? { ...second, 배정학급: c1 } : s);
     newAssignments[c2] = newAssignments[c2].map(s => s.id === second.id ? { ...first, 배정학급: c2 } : s);
+    const violation = getCapacityViolation(result, newAssignments);
+    if (violation) { alert(violation); return; }
 
     // 표준 모드와 동일하게 전출예정 학생은 뒤로, 이름 가나다순 정렬 후 번호 재부여.
     result.activeClassNames.forEach(name => {
@@ -160,6 +166,7 @@ export const PlacementResultDashboard: React.FC<PlacementResultDashboardProps> =
 
   return (
     <div className="space-y-4">
+      {result.capacityPlan && <p role="status" className="rounded-xl bg-blue-50 p-4 text-sm text-blue-900">{result.capacityPlan.message}</p>}
       {/* 6대 핵심 지표 통계 카드 */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-[#dce7f3] shadow-[0_1px_3px_rgba(20,65,120,0.04)] flex flex-col justify-between">
@@ -339,7 +346,7 @@ export const PlacementResultDashboard: React.FC<PlacementResultDashboardProps> =
                           ? 'bg-white/20 text-white'
                           : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
                       }`}>
-                        🌿통합(-{reductionCount * integratedCount})
+                        🌿통합(-{reductionCount})
                       </span>
                     )}
                   </button>

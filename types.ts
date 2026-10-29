@@ -35,7 +35,17 @@ export interface ClassSettings {
   twinGroups?: TwinGroupConfig[];
 }
 
+export interface CapacityPlan {
+  targets: Record<string, number>;
+  integratedClasses: string[];
+  requestedNormalCapacity: number;
+  effectiveNormalCapacity: number;
+  reductionCount: number;
+  message: string;
+}
+
 export interface PlacementResult {
+  capacityPlan?: CapacityPlan;
   assignments: Record<string, Student[]>;
   stats: {
     totalStudents: number;

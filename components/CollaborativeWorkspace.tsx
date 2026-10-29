@@ -1,3 +1,4 @@
+import { getCapacityViolation } from '../utils/capacityPlacement';
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Users, ShieldCheck, Crown, UserCheck, Key, LogOut, CheckCircle2, Settings, AlertOctagon, 
@@ -700,9 +701,11 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
     if (!c1 || !c2 || c1 === c2) return;
 
     const newAssignments = { ...workspace.result.assignments };
-    newAssignments[c1] = newAssignments[c1].map(st => st.id === s1.id ? { ...st, 배정학급: c2 } : st);
-    newAssignments[c2] = newAssignments[c2].map(st => st.id === s2.id ? { ...st, 배정학급: c1 } : st);
+    newAssignments[c1] = newAssignments[c1].map(st => st.id === s1.id ? { ...s2, 배정학급: c1 } : st);
+    newAssignments[c2] = newAssignments[c2].map(st => st.id === s2.id ? { ...s1, 배정학급: c2 } : st);
 
+    const violation = getCapacityViolation(workspace.result, newAssignments);
+    if (violation) { alert(violation); return; }
     const updatedResult: PlacementResult = {
       ...workspace.result,
       assignments: newAssignments
@@ -727,6 +730,8 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
     newAssignments[oldClass] = newAssignments[oldClass].filter(st => st.id !== student.id);
     const movedStudent = { ...student, 배정학급: targetClass };
     newAssignments[targetClass] = [...(newAssignments[targetClass] || []), movedStudent];
+    const violation = getCapacityViolation(workspace.result, newAssignments);
+    if (violation) { alert(violation); return; }
 
     const updatedResult: PlacementResult = {
       ...workspace.result,
@@ -1192,8 +1197,8 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
                   onChange={(e) => setEditReduction(Number(e.target.value))}
                   className="w-full px-3.5 py-2 text-xs border border-blue-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none focus:bg-white bg-white"
                 >
-                  <option value={1}>특수학생 1인당 1명 감축 (-1)</option>
-                  <option value={2}>특수학생 1인당 2명 감축 (-2, 기본)</option>
+                  <option value={1}>통합학급당 1명 감축 (-1)</option>
+                  <option value={2}>통합학급당 2명 감축 (-2, 기본)</option>
                   <option value={0}>정원 감축 없음 (0명)</option>
                 </select>
               </div>
