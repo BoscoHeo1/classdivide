@@ -430,7 +430,15 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
   const canEditRemarks = remarksReady && remarksRoomCode === currentCode && workspace?.code === currentCode
     && membership?.active === true && isHost && workspace?.hostId === firebaseUid
     && workspace?.step === 1 && workspace?.classStatus?.[activeClassTab]?.completed !== true;
-  const remarkDisabledReason = '학급 생성 교사가 입력 완료 전 수정할 수 있습니다.';
+  const remarkDisabledReason = remarksError || (!remarksReady
+    ? '비고를 불러오는 중입니다.'
+    : !isHost || workspace?.hostId !== firebaseUid
+      ? '이 방을 만든 계정만 비고를 수정할 수 있습니다.'
+      : workspace?.step !== 1
+        ? '학급편성 완료 후 비고는 읽기 전용입니다.'
+        : workspace?.classStatus?.[activeClassTab]?.completed
+          ? '입력 완료로 잠겨 있습니다. 상단의 완료 상태 취소를 누르면 수정할 수 있습니다.'
+          : '현재 비고를 수정할 수 없습니다.');
 
   const canEditClass = membership?.active === true && (isHost || membership.classNum === activeClassTab) && workspace?.step === 1;
 
@@ -448,7 +456,8 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
         번호: s.번호 || idx + 1
       }));
 
-      await updateClassStudents(workspace.code, activeClassTab, formatted, true, teacherNameInput);
+      // 업로드는 현재 완료 상태를 유지합니다. 신규 반은 작성 중이며, 이미 마감한 반은 자동 해제하지 않습니다.
+      await updateClassStudents(workspace.code, activeClassTab, formatted, undefined, teacherNameInput);
       alert(`${activeClassTab}반 학생 ${formatted.length}명이 성공적으로 등록되었습니다!`);
     } catch (err: any) {
       alert('엑셀 파일을 읽는 중 오류가 발생했습니다: ' + (err.message || ''));

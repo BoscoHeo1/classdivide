@@ -48,7 +48,10 @@ export const StudentRemark: React.FC<{
       setOriginal(student); setDraft(student.비고 || ''); setMessage(''); setEditing(true);
     }} className="w-full text-left whitespace-pre-wrap break-words p-2 rounded-lg border border-dashed border-blue-200 hover:bg-blue-50 text-blue-800">
       {student.비고 || '비고 입력'}
-    </button> : <span title={disabledReason} className="whitespace-pre-wrap break-words">{student.비고 || '-'}</span>}
+    </button> : <div>
+      <span className="whitespace-pre-wrap break-words">{student.비고 || '-'}</span>
+      {disabledReason && <p className="mt-1 text-[11px] text-slate-500">{disabledReason}</p>}
+    </div>}
     {message && <p role={failed ? 'alert' : 'status'} className={`mt-1 ${failed ? 'text-red-700' : 'text-emerald-700'}`}>{message}</p>}
   </div>;
 };

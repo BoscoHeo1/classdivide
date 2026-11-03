@@ -1,6 +1,7 @@
 // 실제 Firebase SDK·로컬 에뮬레이터·두 브라우저로 검사하며 운영 요청은 차단합니다.
 const assert = require('node:assert/strict');
 const path = require('node:path');
+const XLSX = require('xlsx');
 const { chromium } = require(process.argv[2] || process.env.CLASSDIVIDE_PLAYWRIGHT_PATH || 'playwright');
 const project = 'demo-classdivide-remarks';
 const code = 'FAKE_COLLAB_UI';
@@ -62,16 +63,30 @@ const styles = '.hidden{display:none}.whitespace-pre-wrap{white-space:pre-wrap}'
       { id: 1000001, 학년: 5, 현학급: 1, 번호: 1, 이름: '학생A', 성별: '남성', 생년월일: '', 학습부진: false, 생활지도: '', 학생선수: false, 통합학급: false, 학부모민원: false, 쌍둥이: false, 전출예정: false, 비고: '원본 A' },
       { id: 1000002, 학년: 5, 현학급: 1, 번호: 2, 이름: '학생B', 성별: '여성', 생년월일: '', 학습부진: false, 생활지도: '', 학생선수: false, 통합학급: false, 학부모민원: false, 쌍둥이: false, 전출예정: false, 비고: '' }
     ];
-    const room = { code, name: '가상 협업 검증', hostId: creatorUid, currentClassCount: 1, nextClassCount: 1, reductionCount: 0, placementOrder: 'zigzag', step: 1, updatedAt: 1, classInputs: { 1: students }, classStatus: { 1: { completed: false } } };
+    const room = { code, name: '가상 협업 검증', hostId: creatorUid, currentClassCount: 1, nextClassCount: 1, reductionCount: 0, placementOrder: 'zigzag', step: 1, updatedAt: 1, classStatus: { 1: { completed: false } } };
     await db('PUT', '', { classdivide_workspaces: { [code]: room }, roomMembers: { [code]: { [creatorUid]: { role: 'admin', active: true, classNum: 0 }, [teacherUid]: { role: 'teacher', active: true, classNum: 1 } } } });
     const openClass = async page => {
       await page.getByRole('heading', { name: '가상 협업 검증', exact: true }).waitFor({ timeout: 45000 });
-      await page.getByRole('button', { name: /^1반\s*2명/ }).click();
+      await page.getByRole('button', { name: /^1반\s*\d+명/ }).click();
     };
     await Promise.all([openClass(creator), openClass(teacher)]);
     const edit = (page, name = '학생A') => page.getByRole('button', { name: `${name} 비고 편집`, exact: true });
     const row = (page, name = '학생A') => page.getByRole('row').filter({ hasText: name });
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(students.map(student => ({
+      학년: student.학년, 반: student.현학급, 번호: student.번호, 성명: student.이름, 성별: student.성별, 비고: student.비고
+    }))), '학생명단');
+    creator.once('dialog', dialog => dialog.accept());
+    await creator.locator('input[type=file]').setInputFiles({
+      name: 'fictional-collab.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      buffer: XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' })
+    });
     await edit(creator).waitFor({ timeout: 45000 });
+    const uploaded = await db('GET', wp);
+    assert.equal(uploaded.classStatus[1].completed, false, '엑셀 업로드만으로 학급을 완료 처리하지 않음');
+    assert.equal(uploaded.classInputs[1].length, 2);
+    const uploadedStudents = uploaded.classInputs[1];
+    pass('실제 엑셀 업로드 직후 완료 상태 취소 없이 비고 편집 가능');
     assert.equal(await edit(teacher).count(), 0);
     pass('실제 익명 계정 두 개로 생성자 편집·참여자 읽기 권한 구분');
     await edit(creator).click();
@@ -83,7 +98,7 @@ const styles = '.hidden{display:none}.whitespace-pre-wrap{white-space:pre-wrap}'
     assert.equal(await edit(creator, '학생B').textContent(), '비고 입력');
     pass('생성자 저장이 실제 DB·서버 함수를 거쳐 다른 참여자 화면에 반영, 다른 학생 보존');
     const savedRoom = await db('GET', wp);
-    assert.deepEqual(savedRoom.classInputs[1], students, '원본 명단·비고를 변경하지 않음');
+    assert.deepEqual(savedRoom.classInputs[1], uploadedStudents, '원본 명단·비고를 변경하지 않음');
     assert.ok(!JSON.stringify(await db('GET', `classdivide_student_remarks/${code}`)).includes('협업 저장'));
     pass('실제 DB 암호문 저장 및 기존 학생 원본 보존');
     const teacherAttempt = await teacher.evaluate(async roomCode => {
@@ -124,6 +139,18 @@ const styles = '.hidden{display:none}.whitespace-pre-wrap{white-space:pre-wrap}'
     await creator.getByRole('button', { name: '✅ 우리 반 입력 완료로 표시', exact: true }).click();
     await creator.getByRole('button', { name: '완료 상태 취소 (작성중으로)', exact: true }).waitFor();
     await creator.waitForFunction(() => !document.querySelector('button[aria-label="학생A 비고 편집"]'));
+    const reuploadFinished = new Promise(resolve => creator.once('dialog', async dialog => {
+      await dialog.accept(); resolve();
+    }));
+    await creator.locator('input[type=file]').setInputFiles({
+      name: 'fictional-collab.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      buffer: XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' })
+    });
+    await reuploadFinished;
+    assert.equal((await db('GET', wp)).classStatus[1].completed, true, '완료된 반의 재업로드는 마감을 해제하지 않음');
+    assert.equal(await edit(creator).count(), 0);
+    assert.ok((await row(creator).textContent()).includes('통신 실패 후 재시도'));
+    pass('이미 완료된 반의 재업로드는 마감과 기존 비고를 유지');
     const closedAttempt = await creator.evaluate(async roomCode => {
       const f = await import('/classdivide/firebase.ts'); const ws = await f.getWorkspace(roomCode); const notes = await f.listStudentRemarks(roomCode);
       try { await f.saveStudentRemark(roomCode, ws.students[0], notes[`1:${ws.students[0].id}`], '마감 후 변경'); return 'unexpected-success'; }

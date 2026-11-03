@@ -144,20 +144,26 @@ export const subscribeWorkspace = (rawCode: string, onUpdate: (workspace: Collab
   onValue(ref(rtdb, `classdivide_workspaces/${sanitizeCode(rawCode)}`), s => onUpdate(toWorkspace(s.val())), onError);
 
 export const updateClassStudents = async (rawCode: string, classNum: number, newClassStudents: Student[],
-  isCompleted: boolean, teacherName?: string) => {
+  isCompleted: boolean | undefined, teacherName?: string) => {
   const code = sanitizeCode(rawCode);
   const member = await requireMember(code);
   if (member.role !== 'admin' && member.classNum !== classNum) throw new Error('담당 학급만 수정할 수 있습니다.');
   if (newClassStudents.length >= 1000000) throw new Error('학급 학생 수가 너무 많습니다.');
   const path = `classdivide_workspaces/${code}`;
   const status = (await get(ref(rtdb, `${path}/classStatus/${classNum}`))).val();
+  const statusChanges: Record<string, unknown> = {
+    [`${path}/classStatus/${classNum}/teacherName`]: teacherName || status?.teacherName || `${classNum}반 담임`,
+    [`${path}/classStatus/${classNum}/updatedAt`]: Date.now()
+  };
+  // 업로드에서는 완료 필드를 쓰지 않아 다른 화면에서 동시에 마감해도 상태를 되돌리지 않습니다.
+  if (isCompleted !== undefined || typeof status?.completed !== 'boolean') {
+    statusChanges[`${path}/classStatus/${classNum}/completed`] = isCompleted ?? false;
+  }
   await update(ref(rtdb), normalize({
     [`${path}/classInputs/${classNum}`]: newClassStudents.map((student, index) => ({
       ...student, id: classNum * 1000000 + index + 1, 현학급: classNum
     })),
-    [`${path}/classStatus/${classNum}`]: {
-      completed: isCompleted, teacherName: teacherName || status?.teacherName || `${classNum}반 담임`, updatedAt: Date.now()
-    }
+    ...statusChanges
   }));
 };
 const adminUpdate = async (rawCode: string, changes: object) => {

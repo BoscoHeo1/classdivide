@@ -501,6 +501,7 @@ export const PlacementResultDashboard: React.FC<PlacementResultDashboardProps> =
                 </h4>
                 <ClassTable
                   students={displayedStudents}
+                  remarkDisabledReason="학급편성 완료 후 비고는 읽기 전용입니다."
                   showAssignedClass={true}
                   numberType={resultViewMode === 'oldClass' ? 'original' : 'assigned'}
                   activeClassNames={result.activeClassNames}
@@ -514,6 +515,7 @@ export const PlacementResultDashboard: React.FC<PlacementResultDashboardProps> =
             /* 일반 반별 뷰 */
             <ClassTable
               students={displayedStudents}
+              remarkDisabledReason="학급편성 완료 후 비고는 읽기 전용입니다."
               showAssignedClass={true}
               numberType={resultViewMode === 'oldClass' ? 'original' : 'assigned'}
               activeClassNames={result.activeClassNames}
