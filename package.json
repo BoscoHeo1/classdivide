@@ -7,7 +7,11 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test:capacity": "node tests/capacity.cjs"
+    "test:capacity": "node tests/capacity.cjs",
+    "test:remarks": "node tests/remarks-server.cjs && node tests/remarks-client.cjs && node tests/standalone-storage.cjs",
+    "test:remarks:rules": "node tests/remarks-rules.cjs",
+    "test:remarks:ui": "node tests/remarks-ui.cjs",
+    "test:remarks:collab-ui": "node tests/remarks-collab-ui.cjs"
   },
   "dependencies": {
     "firebase": "^12.18.0",

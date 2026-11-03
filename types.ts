@@ -18,6 +18,7 @@ export interface Student {
   동명이인?: boolean;
   배정학급?: string;
   출석번호?: number;
+  비고?: string;
 }
 
 export interface TwinGroupConfig {

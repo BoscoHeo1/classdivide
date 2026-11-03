@@ -8,6 +8,8 @@ import ClassTable from './components/ClassTable';
 import { DynamicWizard } from './components/DynamicWizard';
 import { CollaborativeWorkspace } from './components/CollaborativeWorkspace';
 import { ManualModal } from './components/ManualModal';
+import { loadStandalone, saveStandalone, StandaloneSnapshot } from './utils/standaloneStorage';
+import { replaceRemark, replaceResultRemark, studentSignature } from './utils/remarks';
 
 const App: React.FC = () => {
   // 최상위 모드: 단독 모드 (기존) vs 동학년 실시간 협업 모드 (신규)
@@ -42,6 +44,57 @@ const App: React.FC = () => {
   const [swapCandidate, setSwapCandidate] = useState<Student | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [storageLoaded, setStorageLoaded] = useState(false);
+  const [storageBlocked, setStorageBlocked] = useState(false);
+  const [storageError, setStorageError] = useState('');
+  const [remarkSaving, setRemarkSaving] = useState(false);
+  const remarkSaveInFlight = useRef(false);
+  const snapshotRef = useRef<StandaloneSnapshot>(null);
+  snapshotRef.current = { students, result, settings, step, fileName };
+
+  useEffect(() => {
+    let cancelled = false;
+    loadStandalone().then(saved => {
+      if (cancelled) return;
+      if (saved) {
+        setStudents(saved.students); setResult(saved.result); setSettings(saved.settings);
+        setStep(saved.step); setFileName(saved.fileName);
+      }
+      setStorageLoaded(true);
+    }).catch(() => {
+      if (cancelled) return;
+      setStorageBlocked(true); setStorageLoaded(true);
+      setStorageError('이 탭의 저장 자료를 복원하지 못했습니다. 기존 저장 자료는 보존되며 자동 저장을 중단했습니다.');
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!storageLoaded || storageBlocked || mainMode !== 'standalone') return;
+    saveStandalone({ students, result, settings, step, fileName }).then(() => setStorageError(''))
+      .catch(() => setStorageError('이 탭에 작업 내용을 저장하지 못했습니다. 저장 공간과 브라우저 설정을 확인해주세요.'));
+  }, [storageLoaded, storageBlocked, mainMode, students, result, settings, step, fileName]);
+
+  const handleSaveRemark = async (original: Student, text: string) => {
+    if (remarkSaveInFlight.current) throw new Error('다른 비고를 저장 중입니다. 잠시 후 다시 시도해주세요.');
+    if (storageBlocked) throw new Error('저장 자료를 복원하지 못해 수정 저장을 중단했습니다. 기존 자료는 보존됩니다.');
+    const current = snapshotRef.current;
+    const target = current.students.find(s => s.id === original.id && s.현학급 === original.현학급);
+    if (!target || studentSignature(target) !== studentSignature(original) || (target.비고 || '') !== (original.비고 || '')) {
+      throw new Error('학생 명단 또는 비고가 변경되었습니다. 입력을 복사해 두고 취소 후 다시 열어주세요.');
+    }
+    remarkSaveInFlight.current = true;
+    setRemarkSaving(true);
+    try {
+      const next = { ...current, students: replaceRemark(current.students, original, text),
+        result: replaceResultRemark(current.result, original, text) };
+      // 로컬 저장 성공 뒤 화면을 갱신하므로 실패 시 입력과 이전 자료가 유지됩니다.
+      await saveStandalone(next);
+      setStudents(next.students); setResult(next.result); setStorageError('');
+    } catch {
+      throw new Error('비고를 저장하지 못했습니다. 입력 내용은 유지됩니다. 다시 시도해주세요.');
+    } finally { remarkSaveInFlight.current = false; setRemarkSaving(false); }
+  };
 
   // Handlers
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -212,6 +265,8 @@ const App: React.FC = () => {
     }
   });
 
+  if (!storageLoaded) return <p className="p-8" role="status">이 탭의 작업 내용을 불러오는 중…</p>;
+
   return (
     <div className="min-h-screen bg-[#f8fbff] text-[#172b4d] font-sans pb-12 sm:pb-16">
       
@@ -228,7 +283,7 @@ const App: React.FC = () => {
           <div className="flex items-center gap-2 sm:gap-3">
             <div className="hidden md:inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50/70 border border-blue-100 rounded-full text-xs text-slate-600">
               <ShieldCheck className="w-3.5 h-3.5 text-[#1677ed] shrink-0" />
-              <span>단독: 브라우저 메모리 처리 · 협업: 서버 실시간 동기화</span>
+              <span>단독: 이 탭에 암호화 저장 · 협업: 서버 동기화</span>
             </div>
             <button
               type="button"
@@ -243,7 +298,9 @@ const App: React.FC = () => {
       </header>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 sm:pt-8">
+      <main inert={remarkSaving || undefined} className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 sm:pt-8">
+        {mainMode === 'standalone' && storageError && <p role="alert" className="mb-4 p-3 bg-amber-50 text-amber-900 rounded-xl">{storageError}</p>}
+        {mainMode === 'standalone' && <p className="mb-3 text-xs text-slate-500">일반모드 작업은 이 탭에만 암호화 저장됩니다. 새로고침 후 복원되며 탭을 닫으면 종료됩니다.</p>}
 
         {/* 🌟 Bosco 스타일 Hero Section */}
         <section aria-labelledby="classdivide-hero-title" className="mb-6 overflow-hidden rounded-3xl border border-blue-100 bg-[#eaf4ff] p-6 sm:p-8">
@@ -425,6 +482,9 @@ const App: React.FC = () => {
                     </div>
                 </div>
 
+                {students.length > 0 && (
+                  <ClassTable students={students} numberType="original" onSaveRemark={handleSaveRemark} />
+                )}
                 {students.length > 0 && (
                     <div className="bg-white px-5 py-4 sm:px-6 border border-[#dce7f3] rounded-2xl shadow-[0_1px_3px_rgba(20,65,120,0.04)]">
                         <div className="flex flex-wrap items-center justify-between gap-4">
@@ -1032,6 +1092,7 @@ const App: React.FC = () => {
 
                                 <ClassTable 
                                     students={displayedStudents} 
+                                    onSaveRemark={handleSaveRemark}
                                     showAssignedClass={true} 
                                     numberType={resultViewMode === 'oldClass' ? 'original' : 'assigned'}
                                     activeClassNames={result.activeClassNames}

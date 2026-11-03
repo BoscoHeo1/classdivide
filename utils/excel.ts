@@ -37,6 +37,7 @@ export const parseExcel = (file: File): Promise<Student[]> => {
             이름: row['성명'] || row['이름'] || '',
             성별: gender,
             생년월일: birthDate,
+            비고: row['비고'] == null ? '' : String(row['비고']),
             학습부진: checkValue(row['학습부진']),
             생활지도: row['생활지도'] || '',
             학생선수: checkValue(row['학생선수']),
@@ -78,7 +79,7 @@ export const generateTemplate = () => {
     { 
       '학년': 5, '반': 1, '번호': 1, '성명': '홍길동', '성별': '남성', '생년월일': '2014.03.15', 
       '학습부진': '', '생활지도': '', '학생선수': '', '통합학급': '', '학부모민원': '', '쌍둥이': '', '전출예정': '',
-      '분리요청학생': '1반 김철수'
+      '분리요청학생': '1반 김철수', '비고': ''
     }
   ];
   const ws = XLSX.utils.json_to_sheet(templateData);
@@ -215,7 +216,8 @@ const formatStudentForExcel = (s: Student, useOriginalNumber: boolean = false) =
         '생년월일': s.생년월일,
         '이전학급': s.현학급 + '반', 
         '배정학급': s.배정학급 + '반',
-        '특이사항': remarks.join(', ')
+        '특이사항': remarks.join(', '),
+        '비고': s.비고 || ''
     };
 };
 

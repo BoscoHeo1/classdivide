@@ -4,6 +4,9 @@ const { randomBytes, createHash, timingSafeEqual } = require('node:crypto');
 const { initializeApp } = require('firebase-admin/app');
 const { getDatabase } = require('firebase-admin/database');
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { defineSecret } = require('firebase-functions/params');
+const { REMARKS_PATH, listRemarks, updateRemark } = require('./remarks');
+const remarksKey = defineSecret('STUDENT_REMARKS_KEY');
 
 initializeApp({
   projectId: 'class-divide',
@@ -151,10 +154,49 @@ exports.deleteWorkspaceSecure = onCall(options, async request => {
     if (!root.classdivide_workspaces?.[code] || !isAdmin(root, code, uid)) {
       return fail('permission-denied', '현재 방의 관리자만 삭제할 수 있습니다.');
     }
-    for (const key of ['classdivide_workspaces', 'roomMembers', 'roomJoinRequests', 'roomSecrets', 'roomRecovery']) {
+    for (const key of ['classdivide_workspaces', 'roomMembers', 'roomJoinRequests', 'roomSecrets', 'roomRecovery', REMARKS_PATH]) {
       if (root[key]) delete root[key][code];
     }
     return ok();
   });
   return { deleted: true };
+});
+
+// 새 비고는 기존 DB 규칙으로 클라이언트 접근이 금지된 별도 경로에 저장합니다.
+exports.listStudentRemarks = onCall({ ...options, secrets: [remarksKey] }, async request => {
+  const { code, uid } = caller(request);
+  let result;
+  try {
+    // 승인을 먼저 확인한 뒤 해당 방만 읽고 다른 방·복구 비밀은 조회하지 않습니다.
+    const db = getDatabase();
+    const member = await db.ref(`roomMembers/${code}/${uid}`).get();
+    const memberValue = member.val();
+    if (memberValue?.active !== true || !['admin', 'teacher'].includes(memberValue.role)) {
+      throw new HttpsError('permission-denied', '이 방의 승인된 권한이 필요합니다.');
+    }
+    const [room, notes] = await Promise.all([
+      db.ref(`classdivide_workspaces/${code}`).get(),
+      db.ref(`${REMARKS_PATH}/${code}`).get()
+    ]);
+    result = listRemarks({
+      classdivide_workspaces: { [code]: room.val() },
+      roomMembers: { [code]: { [uid]: memberValue } },
+      [REMARKS_PATH]: { [code]: notes.val() }
+    }, code, uid, () => remarksKey.value());
+  } catch (error) {
+    if (error instanceof HttpsError) throw error;
+    throw new HttpsError('unavailable', '비고를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.');
+  }
+  if (result.error) throw new HttpsError(result.error.code, result.error.message);
+  return result;
+});
+
+exports.updateStudentRemark = onCall({ ...options, secrets: [remarksKey] }, async request => {
+  const { code, uid } = caller(request);
+  let result;
+  await atomic(root => {
+    result = updateRemark(root, code, uid, request.data, () => remarksKey.value());
+    return result.error ? result : ok();
+  });
+  return result;
 });

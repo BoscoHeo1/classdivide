@@ -3,6 +3,7 @@ import { getAuth, signInAnonymously } from "firebase/auth";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { getDatabase, ref, set, get, update, onValue, serverTimestamp } from "firebase/database";
 import { GradeWorkspace, Student, PlacementResult, ClassSettings, TwinGroupConfig } from "./types";
+import { RemarkRecord, RemarkRecords } from './utils/remarks';
 
 const firebaseConfig = {
   apiKey: "AIzaSyCJNtARfZj7lndDBR6UUTAJzwClOCndclY",
@@ -212,4 +213,20 @@ export const deleteWorkspace = async (rawCode: string) => {
   await ensureAnonymousUser();
   // Server atomically removes room data, memberships, secrets and recovery history.
   await httpsCallable(recoveryFunctions, 'deleteWorkspaceSecure')({ roomCode: sanitizeCode(rawCode) });
+};
+
+// 자유 비고는 기존 명단 쓰기 권한과 분리된 서버 전용 저장 영역을 사용합니다.
+export const listStudentRemarks = async (rawCode: string): Promise<RemarkRecords> => {
+  await ensureAnonymousUser();
+  const response = await httpsCallable<{ roomCode: string }, { notes: RemarkRecords }>(
+    recoveryFunctions, 'listStudentRemarks')({ roomCode: sanitizeCode(rawCode) });
+  return response.data.notes;
+};
+export const saveStudentRemark = async (rawCode: string, student: Student, record: RemarkRecord, text: string): Promise<RemarkRecord> => {
+  await ensureAnonymousUser();
+  const response = await httpsCallable<object, RemarkRecord>(recoveryFunctions, 'updateStudentRemark')({
+    roomCode: sanitizeCode(rawCode), classNum: student.현학급, studentId: student.id,
+    identity: record.identity, expectedVersion: record.version, expectedText: record.text, text
+  });
+  return response.data;
 };

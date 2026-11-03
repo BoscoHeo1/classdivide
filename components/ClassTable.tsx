@@ -1,5 +1,6 @@
 import React from 'react';
 import { Student } from '../types';
+import { StudentRemark, SaveRemark } from './StudentRemark';
 
 interface ClassTableProps {
   students: Student[];
@@ -9,6 +10,8 @@ interface ClassTableProps {
   onClassChange?: (studentId: number, newClassName: string) => void;
   onSelectSwap?: (student: Student) => void;
   swapCandidate?: Student | null;
+  onSaveRemark?: SaveRemark;
+  remarkDisabledReason?: string;
 }
 
 const ClassTable: React.FC<ClassTableProps> = ({ 
@@ -18,7 +21,9 @@ const ClassTable: React.FC<ClassTableProps> = ({
   activeClassNames,
   onClassChange,
   onSelectSwap,
-  swapCandidate
+  swapCandidate,
+  onSaveRemark,
+  remarkDisabledReason
 }) => {
   const getBadgeColor = (type: string, val?: string) => {
       switch(type) {
@@ -79,6 +84,7 @@ const ClassTable: React.FC<ClassTableProps> = ({
             <th className="px-3 py-3 border-b border-blue-100 whitespace-nowrap w-20">이전반</th>
             {showAssignedClass && <th className="px-3 py-3 border-b border-blue-100 whitespace-nowrap w-48">배정반 (조정)</th>}
             <th className="px-3 py-3 border-b border-blue-100 whitespace-nowrap">특이사항</th>
+            <th className="px-3 py-3 border-b border-blue-100 whitespace-nowrap">비고</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-blue-50">
@@ -160,12 +166,13 @@ const ClassTable: React.FC<ClassTableProps> = ({
                 <td className="px-3 py-2">
                     <SpecialBadges s={s} />
                 </td>
+                <td className="px-3 py-2"><StudentRemark student={s} onSave={onSaveRemark} disabledReason={remarkDisabledReason} /></td>
               </tr>
             );
           })}
           {students.length === 0 && (
               <tr>
-                  <td colSpan={showAssignedClass ? 7 : 6} className="px-4 py-8 text-center text-slate-500">
+                  <td colSpan={showAssignedClass ? 8 : 7} className="px-4 py-8 text-center text-slate-500">
                       표시할 학생 데이터가 없습니다.
                   </td>
               </tr>

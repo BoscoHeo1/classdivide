@@ -12,11 +12,14 @@ import {
   updateWorkspaceSettings, deleteWorkspace, ensureAnonymousUser, getOwnMembership,
   subscribeOwnMembership, requestRoomMembership, subscribeOwnRequest, subscribeJoinRequests,
   approveJoinRequest, cancelJoinRequest, restoreCreatorMembership, CollaborationWorkspace, RoomMember, JoinRequest,
-  issueAdminRecoveryCode, recoverWorkspaceAdmin, AdminRecoveryCode, updateWorkspaceTwinGroups
+  issueAdminRecoveryCode, recoverWorkspaceAdmin, AdminRecoveryCode, updateWorkspaceTwinGroups,
+  listStudentRemarks, saveStudentRemark
 } from '../firebase';
 import { parseExcel, generateTemplate, downloadResultsByNewClass, downloadResultsByOldClass } from '../utils/excel';
 import { runPlacementAlgorithm } from '../utils/algorithm';
 import ClassTable from './ClassTable';
+import { StudentRemark } from './StudentRemark';
+import { RemarkRecords, applyRemarks, matchRemarkRecords, remarkKey } from '../utils/remarks';
 import { PlacementResultDashboard } from './PlacementResultDashboard';
 
 interface CollaborativeWorkspaceProps {
@@ -37,6 +40,11 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
   // 1. 방 접속 및 상태
   const [currentCode, setCurrentCode] = useState<string>(() => localStorage.getItem('classdivide_last_room') || '');
   const [workspace, setWorkspace] = useState<CollaborationWorkspace | null>(null);
+  const [remarks, setRemarks] = useState<RemarkRecords>({});
+  const [remarksRoomCode, setRemarksRoomCode] = useState('');
+  const [remarksReady, setRemarksReady] = useState(false);
+  const [remarksError, setRemarksError] = useState('');
+  const [remarksRefresh, setRemarksRefresh] = useState(0);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
@@ -90,6 +98,9 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
   });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const activeRoomRef = useRef(currentCode);
+  activeRoomRef.current = currentCode;
+  const visibleRemarks = remarksRoomCode === currentCode && workspace?.code === currentCode ? remarks : {};
 
   // Authentication starts only when this collaboration component is mounted.
   useEffect(() => {
@@ -112,6 +123,8 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
     setPendingRequest(null);
     setJoinRequests({});
     setTwinGroups([]);
+    setRemarks({});
+    setRemarksRoomCode('');
     if (!currentCode || !firebaseUid) return;
     let stopRoom: (() => void) | undefined;
     let stopRequests: (() => void) | undefined;
@@ -144,6 +157,53 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
     const stopRequest = subscribeOwnRequest(currentCode, firebaseUid, setPendingRequest, onError);
     return () => { stopMember(); stopRequest(); stopRoom?.(); stopRequests?.(); };
   }, [currentCode, firebaseUid]);
+
+  // 기존 방 구독 알림으로 비고를 다시 읽습니다. 늦게 도착한 이전 방/명단 응답은 버립니다.
+  useEffect(() => {
+    let cancelled = false;
+    setRemarksReady(false);
+    setRemarksError('');
+    if (!workspace || !membership?.active) { setRemarks({}); return; }
+    let inFlight = false;
+    const refresh = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const notes = await listStudentRemarks(workspace.code);
+        const matched = await matchRemarkRecords(workspace.students, notes);
+        if (!cancelled) {
+          // 저장 응답보다 늦은 조회 응답이 도착해도 같은 학생의 버전을 되돌리지 않습니다.
+          setRemarks(previous => Object.fromEntries(Object.entries(matched).map(([key, value]) =>
+            [key, previous[key]?.identity === value.identity && previous[key].version > value.version ? previous[key] : value])));
+          setRemarksRoomCode(workspace.code); setRemarksReady(true); setRemarksError('');
+        }
+      } catch {
+        if (!cancelled) setRemarksError('비고를 동기화하지 못했습니다. 서버 연결을 확인하고 다시 불러와주세요.');
+      } finally { inFlight = false; }
+    };
+    void refresh();
+    // 알림 누락이나 일시적인 통신 실패 후에도 별도 외부 서비스 없이 재동기화합니다.
+    const timer = window.setInterval(refresh, 15000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [workspace, membership?.active, remarksRefresh]);
+
+  const handleSaveRemark = async (original: Student, text: string) => {
+    const record = visibleRemarks[remarkKey(original)];
+    if (!workspace || !record) throw new Error('최신 비고를 불러온 뒤 다시 수정해주세요.');
+    try {
+      const saved = await saveStudentRemark(workspace.code, original, record, text);
+      if (activeRoomRef.current === workspace.code) {
+        setRemarks(previous => ({ ...previous, [remarkKey(original)]:
+          previous[remarkKey(original)]?.identity === saved.identity && previous[remarkKey(original)].version > saved.version
+            ? previous[remarkKey(original)] : { ...saved, signature: record.signature } }));
+      }
+    } catch (error: any) {
+      if (error?.code === 'functions/aborted') {
+        throw new Error('학생 명단 또는 비고가 변경되어 덮어쓰지 않았습니다. 입력 내용을 복사해 두고 취소 후 최신 비고를 다시 열어주세요.');
+      }
+      throw new Error((error?.message || '비고를 저장하지 못했습니다.') + ' 입력 내용은 유지됩니다.');
+    }
+  };
 
   // workspace의 twinGroups가 변경되면 로컬 상태 동기화
   useEffect(() => {
@@ -365,6 +425,12 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
 
   // 현재 탭의 반 학생들
   const currentTabStudents = (workspace?.students || []).filter(s => s.현학급 === activeClassTab);
+  const displayedTabStudents = applyRemarks(currentTabStudents, visibleRemarks);
+
+  const canEditRemarks = remarksReady && remarksRoomCode === currentCode && workspace?.code === currentCode
+    && membership?.active === true && isHost && workspace?.hostId === firebaseUid
+    && workspace?.step === 1 && workspace?.classStatus?.[activeClassTab]?.completed !== true;
+  const remarkDisabledReason = '학급 생성 교사가 입력 완료 전 수정할 수 있습니다.';
 
   const canEditClass = membership?.active === true && (isHost || membership.classNum === activeClassTab) && workspace?.step === 1;
 
@@ -1037,6 +1103,10 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
   return (
     <div className="max-w-7xl mx-auto py-1 space-y-4">
       {recoveryDialog}
+      {remarksError && <div role="alert" className="rounded-xl bg-amber-50 p-3 text-xs text-amber-900">
+        {remarksError} <button type="button" onClick={() => setRemarksRefresh(value => value + 1)}
+          className="ml-2 underline">비고 다시 불러오기</button>
+      </div>}
       {/* 헤더 바 */}
       <div className="bg-white border border-[#dce7f3] rounded-2xl p-4 sm:p-5 shadow-[0_1px_3px_rgba(20,65,120,0.04)] flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3 sm:gap-4">
@@ -1337,6 +1407,7 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
 
           <PlacementResultDashboard
             result={workspace.result}
+            remarks={visibleRemarks}
             allStudents={workspace.students}
             reductionCount={workspace.reductionCount}
             onUpdateResult={isHost ? (up) => {
@@ -1729,6 +1800,7 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
                   <p className="text-xs text-[#58708f] mt-1">
                     현재 {activeClassTab}반에 {currentTabStudents.length}명의 학생이 등록되어 있습니다.
                   </p>
+                  <p className="text-xs text-slate-500 mt-2">비고는 학급 생성 교사가 입력 완료 전에 수정할 수 있습니다. 입력 완료된 반은 ‘완료 상태 취소’ 후 수정해주세요.</p>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
@@ -1812,11 +1884,12 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
                           <th className="py-2.5 px-3 text-center">쌍둥이</th>
                           <th className="py-2.5 px-3 text-center">분리배정</th>
                           <th className="py-2.5 px-3 text-center">전출예정</th>
+                          <th className="py-2.5 px-3">비고</th>
                           <th className="py-2.5 px-3 text-center w-16">관리</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 text-slate-700">
-                        {currentTabStudents.map((st, idx) => (
+                        {displayedTabStudents.map((st, idx) => (
                           <tr key={st.id} className="hover:bg-blue-50/50 transition">
                             <td className="py-2.5 px-3 text-center font-mono text-[#58708f]">{st.번호 || idx + 1}</td>
                             <td className="py-2.5 px-3 font-bold text-[#071747]">{st.이름}</td>
@@ -1843,6 +1916,9 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
                             <td className="py-2.5 px-3 text-center">{st.쌍둥이 ? '👥' : '-'}</td>
                             <td className="py-2.5 px-3 text-center font-mono text-[11px]">{st.분리배정 || '-'}</td>
                             <td className="py-2.5 px-3 text-center">{st.전출예정 ? '✈️' : '-'}</td>
+                            <td className="py-2.5 px-3"><StudentRemark student={st}
+                              onSave={canEditRemarks ? handleSaveRemark : undefined}
+                              disabledReason={remarksError || remarkDisabledReason} /></td>
                             <td className="py-2.5 px-3 text-center">
                               <button
                                 disabled={!canEditClass || loading}

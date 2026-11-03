@@ -4,6 +4,7 @@ import { Download, FileSpreadsheet, RefreshCw, AlertTriangle, ArrowRight, Users,
 import { PlacementResult, Student, ClassSettings } from '../types';
 import ClassTable from './ClassTable';
 import { downloadResultsByNewClass, downloadResultsByOldClass } from '../utils/excel';
+import { RemarkRecords, applyRemarks, applyResultRemarks } from '../utils/remarks';
 
 interface PlacementResultDashboardProps {
   result: PlacementResult;
@@ -12,6 +13,7 @@ interface PlacementResultDashboardProps {
   onUpdateResult?: (updatedResult: PlacementResult) => void;
   onReset?: () => void;
   isReadOnly?: boolean;
+  remarks?: RemarkRecords;
 }
 
 export const PlacementResultDashboard: React.FC<PlacementResultDashboardProps> = ({
@@ -20,7 +22,8 @@ export const PlacementResultDashboard: React.FC<PlacementResultDashboardProps> =
   reductionCount = 2,
   onUpdateResult,
   onReset,
-  isReadOnly = false
+  isReadOnly = false,
+  remarks = {}
 }) => {
   const [activeTab, setActiveTab] = useState<string>('ALL');
   const [resultViewMode, setResultViewMode] = useState<'newClass' | 'oldClass'>('newClass');
@@ -28,7 +31,7 @@ export const PlacementResultDashboard: React.FC<PlacementResultDashboardProps> =
   const [swapCandidate, setSwapCandidate] = useState<Student | null>(null);
 
   // 모든 배정된 학생 목록
-  const allAssignedStudents: Student[] = Object.values<Student[]>(result.assignments).flat();
+  const allAssignedStudents: Student[] = applyRemarks(Object.values<Student[]>(result.assignments).flat(), remarks);
 
   // 기존 학급 번호 목록
   const oldClassNumbers = Array.from(new Set(allAssignedStudents.map(s => s.현학급))).sort((a, b) => a - b);
@@ -43,7 +46,7 @@ export const PlacementResultDashboard: React.FC<PlacementResultDashboardProps> =
         s.통합학급 || !!s.생활지도 || s.학습부진 || s.학생선수 || s.쌍둥이 || s.전출예정 || (s.분리배정 && s.분리배정 !== '')
       );
     } else {
-      currentGroupStudents = result.assignments[activeTab] || [];
+      currentGroupStudents = applyRemarks(result.assignments[activeTab] || [], remarks);
     }
   } else {
     if (activeTab === 'ALL') {
@@ -524,7 +527,7 @@ export const PlacementResultDashboard: React.FC<PlacementResultDashboardProps> =
         {/* 엑셀 다운로드 바 */}
         <div className="p-4 sm:p-5 bg-[#f8fbff] border-t border-[#dce7f3] flex flex-wrap justify-end items-center gap-3">
           <button
-            onClick={() => downloadResultsByNewClass(allAssignedStudents, result.assignments)}
+            onClick={() => downloadResultsByNewClass(allAssignedStudents, applyResultRemarks(result, remarks).assignments)}
             className="px-4 py-2.5 bg-[#1677ed] hover:bg-[#1260c4] text-white rounded-xl text-xs sm:text-sm font-semibold transition-all shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 flex items-center cursor-pointer"
           >
             <Download className="w-4 h-4 mr-2" />
