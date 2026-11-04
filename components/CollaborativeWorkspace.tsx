@@ -439,13 +439,15 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
   const currentTabStudents = (workspace?.students || []).filter(s => s.현학급 === activeClassTab);
   const displayedTabStudents = applyRemarks(currentTabStudents, visibleRemarks);
 
-  const canEditRemarks = remarksReady && remarksRoomCode === currentCode && workspace?.code === currentCode
-    && membership?.active === true && isHost && workspace?.hostId === firebaseUid
+  const hasRemarkClassAccess = membership?.active === true && (membership.role === 'admin'
+    || (membership.role === 'teacher' && Number.isSafeInteger(membership.classNum) && membership.classNum === activeClassTab));
+  const canEditRemarks = remarksReady && !remarksError && remarksRoomCode === currentCode && workspace?.code === currentCode
+    && hasRemarkClassAccess
     && workspace?.step === 1 && workspace?.classStatus?.[activeClassTab]?.completed !== true;
   const remarkDisabledReason = remarksError || (!remarksReady
     ? '비고를 불러오는 중입니다.'
-    : !isHost || workspace?.hostId !== firebaseUid
-      ? '이 방을 만든 계정만 비고를 수정할 수 있습니다.'
+    : !hasRemarkClassAccess
+      ? '담임교사는 승인된 본인 학급만 수정할 수 있습니다.'
       : workspace?.step !== 1
         ? '학급편성 완료 후 비고는 읽기 전용입니다.'
         : workspace?.classStatus?.[activeClassTab]?.completed
@@ -1839,7 +1841,7 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
                   <p className="text-xs text-[#58708f] mt-1">
                     현재 {activeClassTab}반에 {currentTabStudents.length}명의 학생이 등록되어 있습니다.
                   </p>
-                  <p className="text-xs text-slate-500 mt-2">엑셀에 입력한 항목은 ‘특이사항 수정’에서 변경할 수 있습니다. 학급 생성 교사만 입력 완료 전에 수정할 수 있으며, 완료된 반은 ‘완료 상태 취소’ 후 수정해주세요.</p>
+                  <p className="text-xs text-slate-500 mt-2">엑셀에 입력한 항목은 ‘특이사항 수정’에서 변경할 수 있습니다. 관리자는 전체 학급, 담임교사는 승인된 본인 학급을 수정할 수 있습니다. 완료된 반은 ‘완료 상태 취소’ 후 수정해주세요.</p>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">

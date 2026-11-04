@@ -77,15 +77,101 @@ test('비어 있는 비고 입력 및 전체 삭제도 버전 증가와 함께 �
   assert.equal(listRemarks(root, code, 'teacher', key).notes['1:1000002'].text, '');
 });
 
-test('참여 교사·권한 해제·복구 관리자·미가입자 수정 거부', () => {
-  for (const uid of ['teacher', 'revoked', 'recovered', 'unknown']) {
+test('권한이 해제된 관리자·교사와 미가입자의 수정 거부', () => {
+  for (const uid of ['revoked', 'unknown']) {
     const root = fixture();
     unchangedFailure(root, uid, input(root), 'permission-denied');
   }
+  for (const uid of ['creator', 'teacher', 'recovered']) {
+    for (const active of [false, 1, 'true', undefined]) {
+      const root = fixture();
+      const request = input(root);
+      root.roomMembers[code][uid].active = active;
+      unchangedFailure(root, uid, request, 'permission-denied');
+    }
+  }
+  assert.equal(listRemarks(fixture(), code, 'unknown', key).error.code, 'permission-denied');
+});
+
+test('승인된 담임은 본인 학급의 메모·구조화 항목을 수정하고 다른 반·원본·협업 기록 보존', () => {
   const root = fixture();
-  root.roomMembers[code].creator.active = 1;
-  unchangedFailure(root, 'creator', input(fixture()), 'permission-denied');
-  assert.equal(listRemarks(root, code, 'unknown', key).error.code, 'permission-denied');
+  const previous = structuredClone(root);
+  const memo = input(root, 1, 1000001, '담임이 직접 수정한 메모');
+  const first = updateRemark(root, code, 'teacher', memo, key);
+  assert.equal(first.text, memo.text);
+  assert.equal(first.version, 1);
+  const details = detailsInput(root, { 학습부진: false, 생활지도: '중', 분리배정: '담임이 수정한 요청' });
+  const second = updateRemark(root, code, 'teacher', details, key);
+  assert.equal(second.version, 2);
+  assert.equal(second.details.학습부진, false);
+  assert.equal(second.details.생활지도, '중');
+  assert.equal(second.text, memo.text);
+  assert.deepEqual(listRemarks(root, code, 'creator', key).notes['1:1000001'], second);
+  assert.equal(root[REMARKS_PATH][code][2], undefined, '다른 반의 저장 경로는 만들지 않음');
+  assert.deepEqual(root.classdivide_workspaces[code].classInputs, previous.classdivide_workspaces[code].classInputs);
+  assert.deepEqual(root.classdivide_workspaces[code].result, previous.classdivide_workspaces[code].result);
+  assert.deepEqual(root.roomMembers, previous.roomMembers);
+  assert.deepEqual(root.roomRecovery, previous.roomRecovery);
+  assert.ok(!JSON.stringify(root[REMARKS_PATH]).includes(memo.text));
+  assert.ok(!JSON.stringify(root[REMARKS_PATH]).includes(details.details.분리배정));
+});
+
+test('관리자와 복구된 관리자는 hostId와 관계없이 모든 반의 메모·특이사항 수정 허용', () => {
+  for (const uid of ['creator', 'recovered']) {
+    for (const [classNum, studentId] of [[1, 1000001], [2, 2000001]]) {
+      const root = fixture();
+      const memo = input(root, classNum, studentId, `${uid}의 ${classNum}반 메모`);
+      assert.equal(updateRemark(root, code, uid, memo, key).text, memo.text);
+      const details = detailsInput(root, { 생활지도: '상', 학생선수: true }, classNum, studentId);
+      const saved = updateRemark(root, code, uid, details, key);
+      assert.equal(saved.details.생활지도, '상');
+      assert.equal(saved.details.학생선수, true);
+      assert.equal(saved.version, 2);
+      assert.equal(root.classdivide_workspaces[code].hostId, 'creator', '기존 생성자 정보 보존');
+      assert.deepEqual(listRemarks(root, code, 'teacher', key).notes[`${classNum}:${studentId}`], saved);
+    }
+  }
+});
+
+test('담임의 다른 반 수정과 학급번호·학생 ID 조합 위조는 저장 거부', () => {
+  const root = fixture();
+  const own = input(root);
+  const other = input(root, 2, 2000001, '다른 반 위조 수정');
+  unchangedFailure(root, 'teacher', other, 'permission-denied');
+  unchangedFailure(root, 'teacher', detailsInput(root, { 생활지도: '상' }, 2, 2000001), 'permission-denied');
+  unchangedFailure(root, 'teacher', { ...other, classNum: 1 }, 'aborted');
+  unchangedFailure(root, 'teacher', { ...own, classNum: 2 }, 'permission-denied');
+  unchangedFailure(root, 'teacher', { ...own, studentId: 2000001, identity: other.identity }, 'aborted');
+});
+
+test('담임의 잘못된 소속 학급 형식은 숫자 변환 없이 모두 권한 거부', () => {
+  for (const classNum of ['1', 0, NaN, 2.5, -1, 3, Infinity, null, undefined]) {
+    const root = fixture();
+    const memo = input(root);
+    const details = detailsInput(root, { 생활지도: '상' });
+    root.roomMembers[code].teacher.classNum = classNum;
+    unchangedFailure(root, 'teacher', memo, 'permission-denied');
+    unchangedFailure(root, 'teacher', details, 'permission-denied');
+  }
+});
+
+test('조회 후 담당 학급 변경·권한 해제 시 이전 화면의 저장은 거부', () => {
+  for (const action of ['changed-class', 'revoked', 'removed']) {
+    const root = fixture();
+    const memo = input(root);
+    const note = listRemarks(root, code, 'teacher', key).notes['1:1000001'];
+    assert.equal(note.identity, memo.identity);
+    const details = detailsInput(root, { 생활지도: '상' });
+    if (action === 'changed-class') root.roomMembers[code].teacher.classNum = 2;
+    else if (action === 'revoked') root.roomMembers[code].teacher.active = false;
+    else delete root.roomMembers[code].teacher;
+    unchangedFailure(root, 'teacher', memo, 'permission-denied');
+    unchangedFailure(root, 'teacher', details, 'permission-denied');
+    if (action === 'changed-class') {
+      const newlyAssigned = input(root, 2, 2000001, '바뀐 담당 반');
+      assert.equal(updateRemark(root, code, 'teacher', newlyAssigned, key).text, newlyAssigned.text);
+    }
+  }
 });
 
 test('학급별 완료 및 전체 배정 마감 후 수정 거부', () => {
@@ -260,18 +346,32 @@ test('구조화 항목 입력의 잘못된 형식·추가 신원필드·누락�
   }
 });
 
-test('구조화 수정도 참여 교사·권한해제·복구관리자·마감 학급에서 저장 차단', () => {
-  for (const uid of ['teacher', 'revoked', 'recovered', 'unknown']) {
+test('구조화 수정도 비활성 사용자·미가입자 및 마감 학급에서 저장 차단', () => {
+  for (const uid of ['revoked', 'unknown']) {
     const root = fixture();
     unchangedFailure(root, uid, detailsInput(root, { 생활지도: '상' }), 'permission-denied');
   }
-  for (const state of ['class', 'room']) {
-    const root = fixture();
-    const request = detailsInput(root, { 생활지도: '상' });
-    if (state === 'class') root.classdivide_workspaces[code].classStatus[1].completed = true;
-    else root.classdivide_workspaces[code].step = 3;
-    unchangedFailure(root, 'creator', request, 'failed-precondition');
+  for (const uid of ['creator', 'recovered', 'teacher']) {
+    for (const state of ['class', 'room']) {
+      const root = fixture();
+      const request = detailsInput(root, { 생활지도: '상' });
+      const memo = input(root);
+      if (state === 'class') root.classdivide_workspaces[code].classStatus[1].completed = true;
+      else root.classdivide_workspaces[code].step = 3;
+      unchangedFailure(root, uid, request, 'failed-precondition');
+      unchangedFailure(root, uid, memo, 'failed-precondition');
+    }
   }
+});
+
+test('다른 반의 마감은 담당 반 수정에 영향이 없으며 저장 직전 자기 반 마감은 차단', () => {
+  const root = fixture();
+  root.classdivide_workspaces[code].classStatus[2].completed = true;
+  const request = detailsInput(root, { 생활지도: '중' });
+  assert.equal(updateRemark(root, code, 'teacher', request, key).details.생활지도, '중');
+  const stale = detailsInput(root, { 생활지도: '상' });
+  root.classdivide_workspaces[code].classStatus[1].completed = true;
+  unchangedFailure(root, 'teacher', stale, 'failed-precondition');
 });
 
 test('화면 편집 도중 엑셀 원본 항목이 바뀌면 버전이 같아도 구조화 저장 충돌', () => {
@@ -439,7 +539,8 @@ test('callable 연결·해당 방만 조회·인증·트랜잭션 저장 통합 
   assert.equal(response.version, 1);
   assert.deepEqual(transactions, [''], '권한·학급·비고를 같은 원자 트랜잭션에서 검증');
   const before = JSON.stringify(root);
-  await assert.rejects(callableExports.updateStudentRemark({ auth: { uid: 'teacher' }, data: change }), error => error.code === 'permission-denied');
+  const otherClassChange = { roomCode: code, ...input(root, 2, 2000001) };
+  await assert.rejects(callableExports.updateStudentRemark({ auth: { uid: 'teacher' }, data: otherClassChange }), error => error.code === 'permission-denied');
   assert.equal(JSON.stringify(root), before);
   const reread = await callableExports.listStudentRemarks({ auth: { uid: 'teacher' }, data: { roomCode: code } });
   assert.equal(reread.notes['1:1000001'].text, change.text);
@@ -454,6 +555,18 @@ test('callable 연결·해당 방만 조회·인증·트랜잭션 저장 통합 
   await assert.rejects(callableExports.updateStudentRemark({ auth: { uid: 'creator' }, data: structuredChange }),
     error => error.code === 'aborted');
   assert.equal(JSON.stringify(root), structuredBeforeConflict);
+  const teacherChange = { roomCode: code, ...detailsInput(root, { 생활지도: '하' }) };
+  const teacherResponse = await callableExports.updateStudentRemark({ auth: { uid: 'teacher' }, data: teacherChange });
+  assert.equal(teacherResponse.details.생활지도, '하');
+  assert.equal(teacherResponse.text, change.text);
+  const adminReread = await callableExports.listStudentRemarks({ auth: { uid: 'recovered' }, data: { roomCode: code } });
+  assert.deepEqual(adminReread.notes['1:1000001'], teacherResponse);
+  const pendingBeforeRevoke = { roomCode: code, ...input(root) };
+  root.roomMembers[code].teacher.active = false;
+  const revokedSnapshot = JSON.stringify(root);
+  await assert.rejects(callableExports.updateStudentRemark({ auth: { uid: 'teacher' }, data: pendingBeforeRevoke }),
+    error => error.code === 'permission-denied');
+  assert.equal(JSON.stringify(root), revokedSnapshot);
 });
 
 (async () => {

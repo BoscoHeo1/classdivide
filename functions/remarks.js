@@ -127,10 +127,12 @@ function updateRemark(root, code, uid, input, getKey, now = Date.now()) {
   const access = memberAccess(root, code, uid);
   if (access.error) return access;
   const { room, member } = access;
-  if (member.role !== 'admin' || room.hostId !== uid) {
-    return fail('permission-denied', '학급을 생성한 교사만 비고를 수정할 수 있습니다.');
-  }
   const { classNum, studentId, identity, expectedVersion, expectedText, text } = input || {};
+  // 담당 학급은 요청·브라우저 정보가 아니라 승인된 서버 회원 정보로 판단합니다.
+  if (member.role !== 'admin' && !(member.role === 'teacher'
+    && Number.isSafeInteger(member.classNum) && member.classNum === classNum)) {
+    return fail('permission-denied', '관리자는 전체 학급을, 담임교사는 승인된 본인 학급만 수정할 수 있습니다.');
+  }
   const editsDetails = Object.hasOwn(input || {}, 'details');
   if (!Number.isSafeInteger(classNum) || classNum < 1 || classNum > room.currentClassCount
     || !Number.isSafeInteger(studentId) || typeof identity !== 'string' || !/^[a-f0-9]{64}$/.test(identity)
