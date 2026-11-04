@@ -1,6 +1,7 @@
 import React from 'react';
 import { Student } from '../types';
 import { StudentRemark, SaveRemark } from './StudentRemark';
+import { StudentDetailsEditor, SaveStudentDetails } from './StudentDetailsEditor';
 
 interface ClassTableProps {
   students: Student[];
@@ -12,6 +13,7 @@ interface ClassTableProps {
   swapCandidate?: Student | null;
   onSaveRemark?: SaveRemark;
   remarkDisabledReason?: string;
+  onSaveDetails?: SaveStudentDetails;
 }
 
 const ClassTable: React.FC<ClassTableProps> = ({ 
@@ -23,7 +25,8 @@ const ClassTable: React.FC<ClassTableProps> = ({
   onSelectSwap,
   swapCandidate,
   onSaveRemark,
-  remarkDisabledReason
+  remarkDisabledReason,
+  onSaveDetails
 }) => {
   const getBadgeColor = (type: string, val?: string) => {
       switch(type) {
@@ -84,7 +87,7 @@ const ClassTable: React.FC<ClassTableProps> = ({
             <th className="px-3 py-3 border-b border-blue-100 whitespace-nowrap w-20">이전반</th>
             {showAssignedClass && <th className="px-3 py-3 border-b border-blue-100 whitespace-nowrap w-48">배정반 (조정)</th>}
             <th className="px-3 py-3 border-b border-blue-100 whitespace-nowrap">특이사항</th>
-            <th className="px-3 py-3 border-b border-blue-100 whitespace-nowrap">비고</th>
+            <th className="px-3 py-3 border-b border-blue-100 whitespace-nowrap">추가 메모</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-blue-50">
@@ -164,7 +167,8 @@ const ClassTable: React.FC<ClassTableProps> = ({
                     </td>
                 )}
                 <td className="px-3 py-2">
-                    <SpecialBadges s={s} />
+                    <StudentDetailsEditor student={s} onSave={onSaveDetails}
+                      disabledReason={!onSaveDetails ? remarkDisabledReason : undefined}><SpecialBadges s={s} /></StudentDetailsEditor>
                 </td>
                 <td className="px-3 py-2"><StudentRemark student={s} onSave={onSaveRemark} disabledReason={remarkDisabledReason} /></td>
               </tr>

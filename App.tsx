@@ -10,6 +10,7 @@ import { CollaborativeWorkspace } from './components/CollaborativeWorkspace';
 import { ManualModal } from './components/ManualModal';
 import { loadStandalone, saveStandalone, StandaloneSnapshot } from './utils/standaloneStorage';
 import { replaceRemark, replaceResultRemark, studentSignature } from './utils/remarks';
+import { StudentDetails, getStudentDetails, detailsEqual, replaceStudentDetails } from './utils/studentDetails';
 
 const App: React.FC = () => {
   // 최상위 모드: 단독 모드 (기존) vs 동학년 실시간 협업 모드 (신규)
@@ -93,6 +94,25 @@ const App: React.FC = () => {
       setStudents(next.students); setResult(next.result); setStorageError('');
     } catch {
       throw new Error('비고를 저장하지 못했습니다. 입력 내용은 유지됩니다. 다시 시도해주세요.');
+    } finally { remarkSaveInFlight.current = false; setRemarkSaving(false); }
+  };
+
+  const handleSaveDetails = async (original: Student, details: StudentDetails) => {
+    if (remarkSaveInFlight.current) throw new Error('다른 항목을 저장 중입니다. 잠시 후 다시 시도해주세요.');
+    if (storageBlocked) throw new Error('저장 자료를 복원하지 못해 수정 저장을 중단했습니다.');
+    const current = snapshotRef.current;
+    const target = current.students.find(student => student.id === original.id && studentSignature(student) === studentSignature(original));
+    if (current.step !== 1) throw new Error('편성 결과를 보존하기 위해 학생 명단 입력 단계에서만 수정할 수 있습니다.');
+    if (!target || !detailsEqual(getStudentDetails(target), getStudentDetails(original))) {
+      throw new Error('학생 명단 또는 특이사항이 변경되었습니다. 입력 내용을 보관하고 최신 값을 다시 열어주세요.');
+    }
+    remarkSaveInFlight.current = true; setRemarkSaving(true);
+    try {
+      const next = { ...current, students: replaceStudentDetails(current.students, original, details) };
+      await saveStandalone(next);
+      setStudents(next.students); setStorageError('');
+    } catch {
+      throw new Error('특이사항을 저장하지 못했습니다. 입력 내용은 유지됩니다. 다시 시도해주세요.');
     } finally { remarkSaveInFlight.current = false; setRemarkSaving(false); }
   };
 
@@ -483,7 +503,7 @@ const App: React.FC = () => {
                 </div>
 
                 {students.length > 0 && (
-                  <ClassTable students={students} numberType="original" onSaveRemark={handleSaveRemark} />
+                  <ClassTable students={students} numberType="original" onSaveRemark={handleSaveRemark} onSaveDetails={handleSaveDetails} />
                 )}
                 {students.length > 0 && (
                     <div className="bg-white px-5 py-4 sm:px-6 border border-[#dce7f3] rounded-2xl shadow-[0_1px_3px_rgba(20,65,120,0.04)]">

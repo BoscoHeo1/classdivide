@@ -28,7 +28,7 @@ const { chromium } = require(process.argv[2] || process.env.CLASSDIVIDE_PLAYWRIG
     await open();
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([
-      { 학년: 5, 반: 1, 번호: 1, 성명: '학생A', 성별: '남성', 비고: '기존 비고' },
+      { 학년: 5, 반: 1, 번호: 1, 성명: '학생A', 성별: '남성', 비고: '기존 비고', 학습부진: 'O', 생활지도: '중', 학부모민원: 'O', 쌍둥이: '동일', 분리배정: '1반 학생B' },
       { 학년: 5, 반: 1, 번호: 2, 성명: '학생B', 성별: '여성', 비고: '' }
     ]), '학생명단');
     await page.locator('input[type=file]').first().setInputFiles({ name: 'fictional.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', buffer: XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) });
@@ -74,8 +74,68 @@ const { chromium } = require(process.argv[2] || process.env.CLASSDIVIDE_PLAYWRIG
     await editB().waitFor();
     assert.equal(await editB().innerText(), '비고 입력');
     console.log('PASS 빈 문자열 저장·새로고침 유지');
+    const editDetailsA = () => page.getByRole('button', { name: '학생A 특이사항 수정', exact: true }).first();
+    const editDetailsB = () => page.getByRole('button', { name: '학생B 특이사항 수정', exact: true }).first();
+    const detailsA = () => page.getByRole('group', { name: '학생A 특이사항', exact: true });
+    await editDetailsA().click();
+    assert.equal(await detailsA().getByRole('checkbox', { name: '학습부진', exact: true }).isChecked(), true);
+    assert.equal(await detailsA().getByRole('checkbox', { name: '학부모민원', exact: true }).isChecked(), true);
+    assert.equal(await detailsA().getByRole('checkbox', { name: '학생선수', exact: true }).isChecked(), false);
+    assert.equal(await detailsA().getByLabel('생활지도', { exact: true }).inputValue(), '중');
+    assert.equal(await detailsA().getByLabel('쌍둥이 배정', { exact: true }).inputValue(), '동일');
+    assert.equal(await detailsA().getByLabel('분리배정', { exact: true }).inputValue(), '1반 학생B');
+    await detailsA().getByRole('checkbox', { name: '학습부진', exact: true }).uncheck();
+    await detailsA().getByLabel('생활지도', { exact: true }).selectOption('상');
+    await page.getByRole('button', { name: '취소', exact: true }).click();
+    await editDetailsA().click();
+    assert.equal(await detailsA().getByRole('checkbox', { name: '학습부진', exact: true }).isChecked(), true);
+    assert.equal(await detailsA().getByLabel('생활지도', { exact: true }).inputValue(), '중');
+    console.log('PASS 엑셀 특이사항 기본값 표시·취소 후 원래 값 보존');
+    await detailsA().getByRole('checkbox', { name: '학습부진', exact: true }).uncheck();
+    await detailsA().getByRole('checkbox', { name: '학생선수', exact: true }).check();
+    await detailsA().getByRole('checkbox', { name: '특수(통합)', exact: true }).check();
+    await detailsA().getByRole('checkbox', { name: '쌍둥이', exact: true }).uncheck();
+    assert.equal(await detailsA().getByLabel('쌍둥이 배정', { exact: true }).isDisabled(), true);
+    await detailsA().getByLabel('생활지도', { exact: true }).selectOption('상');
+    await detailsA().getByLabel('분리배정', { exact: true }).fill('');
+    await page.evaluate(() => { window.__setItem = Storage.prototype.setItem; Storage.prototype.setItem = function(key, value) { if (key === 'classdivide_standalone_encrypted_v1') throw new DOMException('특이사항 시험 저장 실패', 'QuotaExceededError'); return window.__setItem.call(this, key, value); }; });
+    await page.getByRole('button', { name: '특이사항 저장', exact: true }).click();
+    await page.getByRole('alert').filter({ hasText: '특이사항' }).waitFor();
+    assert.equal(await detailsA().getByRole('checkbox', { name: '학생선수', exact: true }).isChecked(), true);
+    assert.equal(await detailsA().getByLabel('생활지도', { exact: true }).inputValue(), '상');
+    await page.evaluate(() => { Storage.prototype.setItem = window.__setItem; });
+    await page.getByRole('button', { name: '특이사항 저장', exact: true }).click();
+    await page.getByRole('status').filter({ hasText: '특이사항이 변경되었습니다.' }).waitFor();
+    await editDetailsB().click();
+    const detailsB = page.getByRole('group', { name: '학생B 특이사항', exact: true });
+    assert.equal(await detailsB.getByRole('checkbox', { name: '학생선수', exact: true }).isChecked(), false);
+    assert.equal(await detailsB.getByRole('checkbox', { name: '특수(통합)', exact: true }).isChecked(), false);
+    assert.equal(await detailsB.getByLabel('생활지도', { exact: true }).inputValue(), '');
+    await page.getByRole('button', { name: '취소', exact: true }).click();
+    assert.equal(await editA().innerText(), '실패 후 재시도');
+    console.log('PASS 특이사항 저장 실패·초안 유지·재시도·다른 학생과 자유 메모 보존');
+    await page.reload();
+    await page.addStyleTag({ content: '.hidden{display:none}.whitespace-pre-wrap{white-space:pre-wrap}' });
+    await editDetailsA().click();
+    assert.equal(await detailsA().getByRole('checkbox', { name: '학습부진', exact: true }).isChecked(), false);
+    assert.equal(await detailsA().getByRole('checkbox', { name: '학생선수', exact: true }).isChecked(), true);
+    assert.equal(await detailsA().getByRole('checkbox', { name: '특수(통합)', exact: true }).isChecked(), true);
+    assert.equal(await detailsA().getByRole('checkbox', { name: '쌍둥이', exact: true }).isChecked(), false);
+    assert.equal(await detailsA().getByLabel('생활지도', { exact: true }).inputValue(), '상');
+    assert.equal(await detailsA().getByLabel('분리배정', { exact: true }).inputValue(), '');
+    await page.getByRole('button', { name: '취소', exact: true }).click();
+    console.log('PASS 특이사항 새로고침 복원');
     await page.getByRole('button', { name: '다음 단계', exact: true }).click();
     await page.getByRole('heading', { name: '2단계: 편성 규칙 설정', exact: true }).waitFor();
+    await page.getByRole('button', { name: '학급 편성 실행', exact: true }).click();
+    await page.getByRole('heading', { name: '3단계: 결과 확인', exact: true }).waitFor();
+    assert.equal(await page.getByRole('button', { name: '학생A 특이사항 수정', exact: true }).count(), 0);
+    const assigned = page.getByRole('row').filter({ has: page.getByText('학생A', { exact: true }) });
+    assert.equal(await assigned.count(), 1);
+    assert.match(await assigned.innerText(), /학생선수/);
+    assert.match(await assigned.innerText(), /생활\(상\)/);
+    assert.match(await assigned.innerText(), /특수/);
+    console.log('PASS 수정한 특이사항으로 학급편성·결과 표시·결과 단계 일반 수정 차단');
     assert.deepEqual(errors, []);
     console.log('PASS 브라우저 실행 오류 없음');
   } finally {

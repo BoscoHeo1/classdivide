@@ -23,7 +23,9 @@ function loadTypeScript(filename) {
   return moduleObject.exports;
 }
 const remarks = loadTypeScript(path.join(repo, 'utils/remarks.ts'));
+const studentDetails = loadTypeScript(path.join(repo, 'utils/studentDetails.ts'));
 const excel = loadTypeScript(path.join(repo, 'utils/excel.ts'));
+const runPlacementAlgorithm = loadTypeScript(path.join(repo, 'utils/algorithm.ts')).runPlacementAlgorithm;
 const serverIdentity = require(path.join(repo, 'functions/remarks.js')).studentIdentity;
 globalThis.FileReader = class {
   readAsArrayBuffer(file) {
@@ -37,7 +39,8 @@ const student = (id, classNum = 1, text) => ({
   쌍둥이: false, 전출예정: false, 배정학급: '가', 출석번호: id, ...(text === undefined ? {} : { 비고: text })
 });
 const resultFor = students => ({ assignments: { 가: students.slice(0, 1), 나: students.slice(1) }, stats: { totalStudents: students.length }, activeClassNames: ['가', '나'], capacityPlan: { targets: { 가: 1, 나: students.length - 1 } } });
-const recordFor = (s, text, version = 1) => ({ text, version, identity: createHash('sha256').update(remarks.studentSignature(s)).digest('hex') });
+const recordFor = (s, text, version = 1, details) => ({ text, version,
+  identity: createHash('sha256').update(remarks.studentSignature(s)).digest('hex'), ...(details ? { details } : {}) });
 function workbookFile(rows) {
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), '가상명단');
@@ -135,6 +138,139 @@ test('결과 화면 비고 합치기는 편성결과를 수정하지 않으며 �
   assert.equal(actual.stats, input.stats);
   assert.equal(remarks.applyResultRemarks(null, matched), null);
 });
+test('암호화 조회의 구조화 항목은 선택 학생·결과 화면에만 합치고 원본과 배정 유지', async () => {
+  const raw = [student(1000001, 1, '원본 비고'), student(1000002, 1, '다른 학생 비고')];
+  raw[0].학습부진 = true;
+  const details = studentDetails.getStudentDetails({ ...raw[0], 학습부진: false,
+    생활지도: '상', 학생선수: true, 통합학급: true, 학부모민원: true,
+    쌍둥이: true, 쌍둥이옵션: '동일', 전출예정: true, 분리배정: '2반 가상학생'
+  });
+  const notes = { [remarks.remarkKey(raw[0])]: recordFor(raw[0], '수정 비고', 7, details) };
+  const before = structuredClone({ raw, notes });
+  const matched = await remarks.matchRemarkRecords(raw, notes);
+  const effective = remarks.applyRemarks(raw, matched);
+  assert.deepEqual(studentDetails.getStudentDetails(effective[0]), details);
+  assert.equal(effective[0].비고, '수정 비고');
+  assert.equal(effective[0].이름, raw[0].이름);
+  assert.equal(effective[0].번호, raw[0].번호);
+  assert.equal(effective[0].배정학급, raw[0].배정학급);
+  assert.equal(effective[0].출석번호, raw[0].출석번호);
+  assert.equal(effective[1], raw[1]);
+  const result = resultFor(raw);
+  const view = remarks.applyResultRemarks(result, matched);
+  assert.deepEqual(studentDetails.getStudentDetails(view.assignments.가[0]), details);
+  assert.equal(view.assignments.가[0].비고, '수정 비고');
+  assert.equal(view.assignments.나[0], raw[1]);
+  assert.equal(view.stats, result.stats);
+  assert.equal(view.capacityPlan, result.capacityPlan);
+  assert.deepEqual({ raw, notes }, before);
+});
+
+test('새 학생에게 늦은 이전 구조화 응답을 붙이지 않음', async () => {
+  const original = student(1000001);
+  const replacement = { ...original, 이름: '가상 신규 학생', 번호: 9 };
+  const details = studentDetails.getStudentDetails({ ...original, 통합학급: true, 생활지도: '상' });
+  const matched = await remarks.matchRemarkRecords([original], {
+    [remarks.remarkKey(original)]: recordFor(original, '이전 메모', 2, details)
+  });
+  assert.equal(remarks.applyRemarks([replacement], matched)[0], replacement);
+  assert.equal(remarks.applyResultRemarks(resultFor([replacement]), matched).assignments.가[0], replacement);
+});
+
+test('결과 저장은 암호화 수정 필드·비고를 엑셀 원본으로 되돌리고 원래 누락 키는 삭제', async () => {
+  const raw = [student(1000001), student(1000002, 1, '원본 비고')];
+  delete raw[0].학부모민원;
+  delete raw[0].생활지도;
+  delete raw[0].쌍둥이옵션;
+  raw[1].학습부진 = true;
+  raw[1].생활지도 = '중';
+  const notes = Object.fromEntries(raw.map(s => [remarks.remarkKey(s), recordFor(s, '암호화한 메모', 1,
+    studentDetails.getStudentDetails({ ...s, 학습부진: false, 생활지도: '상', 학생선수: true,
+      통합학급: true, 학부모민원: true, 쌍둥이: true, 쌍둥이옵션: '동일', 전출예정: true,
+      분리배정: '암호화한 분리 요청' }))]));
+  const matched = await remarks.matchRemarkRecords(raw, notes);
+  const displayed = remarks.applyResultRemarks(resultFor(raw), matched);
+  displayed.assignments.가[0].배정학급 = '가';
+  displayed.assignments.나[0].배정학급 = '나';
+  displayed.assignments.나[0].출석번호 = 8;
+  const before = structuredClone(displayed);
+  const stored = remarks.resultForStorage(displayed, raw);
+  const storedA = stored.assignments.가[0];
+  const storedB = stored.assignments.나[0];
+  for (const field of [...studentDetails.studentDetailsFields, '비고']) {
+    if (Object.hasOwn(raw[0], field)) assert.equal(storedA[field], raw[0][field]);
+    else assert.equal(Object.hasOwn(storedA, field), false, `${field} 누락 상태 보존`);
+    if (Object.hasOwn(raw[1], field)) assert.equal(storedB[field], raw[1][field]);
+    else assert.equal(Object.hasOwn(storedB, field), false, `${field} 누락 상태 보존`);
+  }
+  assert.equal(storedA.배정학급, '가');
+  assert.equal(storedB.배정학급, '나');
+  assert.equal(storedB.출석번호, 8);
+  assert.equal(stored.stats, displayed.stats);
+  assert.equal(stored.capacityPlan, displayed.capacityPlan);
+  assert.equal(stored.activeClassNames, displayed.activeClassNames);
+  assert.deepEqual(displayed, before);
+  assert.ok(!JSON.stringify(stored).includes('암호화한 메모'));
+  assert.ok(!JSON.stringify(stored).includes('암호화한 분리 요청'));
+  assert.deepEqual(remarks.applyResultRemarks(stored, matched), displayed, '저장 후 재조회 화면에서 암호화 수정값을 재결합');
+});
+
+test('결과 저장 대상의 학생 신원이 바뀌면 원본 추측 없이 저장 거부', () => {
+  const raw = [student(1000001)];
+  const changed = { ...raw[0], 이름: '바뀐 학생' };
+  const result = resultFor([changed]);
+  const before = structuredClone(result);
+  assert.throws(() => remarks.resultForStorage(result, raw), /학생 명단이 변경/);
+  assert.deepEqual(result, before);
+});
+
+test('편성 알고리즘은 화면에서 수정한 통합·생활·지원·분리·쌍둥이 항목으로 계산', async () => {
+  const raw = Array.from({ length: 8 }, (_, index) => student(index + 1, 1));
+  const changed = studentDetails.getStudentDetails({ ...raw[0], 통합학급: true, 생활지도: '상',
+    학습부진: true, 학생선수: true, 학부모민원: true, 전출예정: true,
+    분리배정: `1반 ${raw[1].이름}` });
+  const notes = { [remarks.remarkKey(raw[0])]: recordFor(raw[0], '수정 후 배정', 1, changed) };
+  for (const twin of [raw[2], raw[3]]) {
+    notes[remarks.remarkKey(twin)] = recordFor(twin, '', 1,
+      studentDetails.getStudentDetails({ ...twin, 쌍둥이: true, 쌍둥이옵션: '동일' }));
+  }
+  const matched = await remarks.matchRemarkRecords(raw, notes);
+  const effective = remarks.applyRemarks(raw, matched);
+  const before = structuredClone(effective);
+  const result = runPlacementAlgorithm(effective, {
+    currentClassCount: 1, nextClassCount: 2, normalCapacity: 4, reductionCount: 2, placementOrder: 'zigzag'
+  });
+  const all = Object.values(result.assignments).flat();
+  const byId = new Map(all.map(s => [s.id, s]));
+  assert.equal(result.stats.integrated, 1);
+  assert.equal(result.stats.highGuidance, 1);
+  assert.equal(result.stats.underachieving, 1);
+  assert.equal(result.stats.athletes, 1);
+  assert.equal(result.stats.parentComplaints, 1);
+  assert.equal(result.assignments[byId.get(1).배정학급].length, 3, '수정된 통합학급에 감축 적용');
+  assert.notEqual(byId.get(1).배정학급, byId.get(2).배정학급, '수정한 분리 요청 적용');
+  assert.equal(byId.get(3).배정학급, byId.get(4).배정학급, '수정한 쌍둥이 같은반 적용');
+  assert.equal(result.assignments[byId.get(1).배정학급].at(-1).id, 1, '수정한 전출예정은 뒤 번호');
+  assert.equal(byId.get(1).비고, '수정 후 배정');
+  assert.deepEqual(effective, before, '알고리즘이 편집된 입력을 변경하지 않음');
+  assert.ok(raw.every(s => s.통합학급 === false && s.쌍둥이 === false), '엑셀 원본 불변');
+  const stored = remarks.resultForStorage(result, raw);
+  assert.ok(Object.values(stored.assignments).flat().every(s => s.통합학급 === false && s.쌍둥이 === false));
+  assert.equal(stored.stats, result.stats);
+  assert.deepEqual(remarks.applyResultRemarks(stored, matched), result);
+});
+
+test('협업의 빈 명시적 그룹은 생년월일로 쌍둥이 관계를 자동 추정하지 않으며 일반모드 추정은 유지', () => {
+  const input = Array.from({ length: 8 }, (_, index) => student(index + 1));
+  input[0] = { ...input[0], 쌍둥이: true, 쌍둥이옵션: '동일', 생년월일: '2014.01.01', 분리배정: `1반 ${input[1].이름}` };
+  input[1] = { ...input[1], 쌍둥이: true, 쌍둥이옵션: '동일', 생년월일: '2014.01.01' };
+  const settings = { currentClassCount: 1, nextClassCount: 2, normalCapacity: 4, reductionCount: 0, placementOrder: 'zigzag' };
+  assert.throws(() => runPlacementAlgorithm(input, settings), /동일|분리|같은|충돌/);
+  const result = runPlacementAlgorithm(input, { ...settings, twinGroups: [] });
+  const placed = Object.values(result.assignments).flat();
+  assert.notEqual(placed.find(s => s.id === 1).배정학급, placed.find(s => s.id === 2).배정학급);
+});
+
 test('실제 XLSX 바이트 읽기: 여러줄·빈값·숫자 비고와 기존 학생 속성 유지', async () => {
   const rows = [
     { 학년: 5, 반: 1, 번호: 1, 성명: '가상학생A', 성별: '여', 비고: '메모 첫 줄\n둘째 줄', 통합학급: 'O', 생활지도: '중' },

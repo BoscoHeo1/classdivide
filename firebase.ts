@@ -1,9 +1,9 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, signInAnonymously } from "firebase/auth";
 import { getFunctions, httpsCallable } from "firebase/functions";
-import { getDatabase, ref, set, get, update, onValue, serverTimestamp } from "firebase/database";
+import { getDatabase, ref, set, get, update, onValue, serverTimestamp, runTransaction } from "firebase/database";
 import { GradeWorkspace, Student, PlacementResult, ClassSettings, TwinGroupConfig } from "./types";
-import { RemarkRecord, RemarkRecords } from './utils/remarks';
+import { RemarkRecord, RemarkRecords, resultForStorage } from './utils/remarks';
 
 const firebaseConfig = {
   apiKey: "AIzaSyCJNtARfZj7lndDBR6UUTAJzwClOCndclY",
@@ -172,11 +172,29 @@ const adminUpdate = async (rawCode: string, changes: object) => {
 };
 export const updateWorkspaceTwinGroups = async (rawCode: string, twinGroups: TwinGroupConfig[]) =>
   adminUpdate(rawCode, { twinGroups });
-export const executeWorkspacePlacement = async (rawCode: string, result: PlacementResult, settings: ClassSettings) =>
-  adminUpdate(rawCode, { step: 3, result, currentClassCount: settings.currentClassCount,
-    nextClassCount: settings.nextClassCount, reductionCount: settings.reductionCount, placementOrder: settings.placementOrder,
-    twinGroups: settings.twinGroups || [] });
-export const updateWorkspaceResult = async (rawCode: string, result: PlacementResult) => adminUpdate(rawCode, { result });
+export const executeWorkspacePlacement = async (rawCode: string, result: PlacementResult, settings: ClassSettings,
+  expected: CollaborationWorkspace) => {
+  await requireMember(rawCode, true);
+  const storedResult = resultForStorage(result, expected.students);
+  // 계산 중 수정·마감·명단 업로드가 발생하면 이전 결과로 덮어쓰지 않습니다.
+  const snapshot = (workspace: CollaborationWorkspace) => JSON.stringify([
+    workspace.step, workspace.updatedAt, workspace.students, workspace.classStatus, workspace.twinGroups,
+    workspace.currentClassCount, workspace.nextClassCount, workspace.reductionCount, workspace.placementOrder
+  ]);
+  const outcome = await runTransaction(ref(rtdb, `classdivide_workspaces/${sanitizeCode(rawCode)}`), current => {
+    const latest = toWorkspace(current);
+    if (!latest || latest.step !== 1 || snapshot(latest) !== snapshot(expected)) return;
+    return normalize({ ...current, step: 3, result: storedResult, updatedAt: Date.now(),
+      currentClassCount: settings.currentClassCount, nextClassCount: settings.nextClassCount,
+      reductionCount: settings.reductionCount, placementOrder: settings.placementOrder, twinGroups: settings.twinGroups || [] });
+  }, { applyLocally: false });
+  if (!outcome.committed) throw new Error('계산 중 학생 명단·특이사항 또는 마감 상태가 변경되었습니다. 최신 값으로 다시 실행해주세요.');
+};
+export const updateWorkspaceResult = async (rawCode: string, result: PlacementResult) => {
+  const workspace = await getWorkspace(rawCode);
+  if (!workspace) throw new Error('존재하지 않는 방입니다.');
+  await adminUpdate(rawCode, { result: resultForStorage(result, workspace.students) });
+};
 export const resetWorkspaceToInput = async (rawCode: string) => adminUpdate(rawCode, { step: 1, result: null });
 export const updateWorkspaceSettings = async (rawCode: string, settings: {
   name?: string; currentClassCount?: number; nextClassCount?: number; reductionCount?: number; placementOrder?: 'zigzag' | 'linear';
@@ -228,11 +246,13 @@ export const listStudentRemarks = async (rawCode: string): Promise<RemarkRecords
     recoveryFunctions, 'listStudentRemarks')({ roomCode: sanitizeCode(rawCode) });
   return response.data.notes;
 };
-export const saveStudentRemark = async (rawCode: string, student: Student, record: RemarkRecord, text: string): Promise<RemarkRecord> => {
+export const saveStudentRemark = async (rawCode: string, student: Student, record: RemarkRecord, text: string,
+  details?: import('./utils/studentDetails').StudentDetails): Promise<RemarkRecord> => {
   await ensureAnonymousUser();
   const response = await httpsCallable<object, RemarkRecord>(recoveryFunctions, 'updateStudentRemark')({
     roomCode: sanitizeCode(rawCode), classNum: student.현학급, studentId: student.id,
-    identity: record.identity, expectedVersion: record.version, expectedText: record.text, text
+    identity: record.identity, expectedVersion: record.version, expectedText: record.text, text,
+    ...(details ? { details, expectedDetails: record.details } : {})
   });
   return response.data;
 };

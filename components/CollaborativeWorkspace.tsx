@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { Student, ClassSettings, PlacementResult, TwinGroupConfig } from '../types';
 import { 
-  createWorkspace, subscribeWorkspace, updateClassStudents, 
+  createWorkspace, subscribeWorkspace, updateClassStudents, getWorkspace,
   executeWorkspacePlacement, updateWorkspaceResult, resetWorkspaceToInput, 
   updateWorkspaceSettings, deleteWorkspace, ensureAnonymousUser, getOwnMembership,
   subscribeOwnMembership, requestRoomMembership, subscribeOwnRequest, subscribeJoinRequests,
@@ -19,7 +19,9 @@ import { parseExcel, generateTemplate, downloadResultsByNewClass, downloadResult
 import { runPlacementAlgorithm } from '../utils/algorithm';
 import ClassTable from './ClassTable';
 import { StudentRemark } from './StudentRemark';
-import { RemarkRecords, applyRemarks, matchRemarkRecords, remarkKey } from '../utils/remarks';
+import { StudentDetailsEditor } from './StudentDetailsEditor';
+import { StudentDetails } from '../utils/studentDetails';
+import { RemarkRecords, applyRemarks, matchRemarkRecords, remarkKey, studentSignature } from '../utils/remarks';
 import { PlacementResultDashboard } from './PlacementResultDashboard';
 
 interface CollaborativeWorkspaceProps {
@@ -101,6 +103,10 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
   const activeRoomRef = useRef(currentCode);
   activeRoomRef.current = currentCode;
   const visibleRemarks = remarksRoomCode === currentCode && workspace?.code === currentCode ? remarks : {};
+  const effectiveStudents = applyRemarks(workspace?.students || [], visibleRemarks);
+  const resultRemarksReady = remarksReady && !remarksError && remarksRoomCode === currentCode
+    && workspace?.code === currentCode && Object.values<Student[]>(workspace?.result?.assignments || {}).flat().every(student =>
+      visibleRemarks[remarkKey(student)]?.signature === studentSignature(student) && !!visibleRemarks[remarkKey(student)]?.details);
 
   // Authentication starts only when this collaboration component is mounted.
   useEffect(() => {
@@ -187,11 +193,11 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [workspace, membership?.active, remarksRefresh]);
 
-  const handleSaveRemark = async (original: Student, text: string) => {
+  const handleSaveRemark = async (original: Student, text: string, details?: StudentDetails) => {
     const record = visibleRemarks[remarkKey(original)];
     if (!workspace || !record) throw new Error('최신 비고를 불러온 뒤 다시 수정해주세요.');
     try {
-      const saved = await saveStudentRemark(workspace.code, original, record, text);
+      const saved = await saveStudentRemark(workspace.code, original, record, text, details);
       if (activeRoomRef.current === workspace.code) {
         setRemarks(previous => ({ ...previous, [remarkKey(original)]:
           previous[remarkKey(original)]?.identity === saved.identity && previous[remarkKey(original)].version > saved.version
@@ -203,6 +209,12 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
       }
       throw new Error((error?.message || '비고를 저장하지 못했습니다.') + ' 입력 내용은 유지됩니다.');
     }
+  };
+
+  const handleSaveDetails = async (original: Student, details: StudentDetails) => {
+    const record = visibleRemarks[remarkKey(original)];
+    if (!record?.details) throw new Error('특이사항 편집 서버를 확인하고 다시 불러와주세요. 입력 내용은 유지됩니다.');
+    await handleSaveRemark(original, record.text, details);
   };
 
   // workspace의 twinGroups가 변경되면 로컬 상태 동기화
@@ -534,7 +546,7 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
   };
 
   // 👶 쌍둥이 후보 학생 목록 (각 반 담임교사가 '쌍둥이: true'로 등록한 전체 학생)
-  const allTwinCandidates = (workspace?.students || []).filter(s => s.쌍둥이);
+  const allTwinCandidates = effectiveStudents.filter(s => s.쌍둥이);
 
   // 현재 어떤 쌍둥이 그룹에든 배정된 학생 ID 집합
   const assignedTwinStudentIds = new Set<number>();
@@ -654,12 +666,11 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
   };
 
   // 👶 배정 실행 전 쌍둥이 그룹 유효성 검사
-  const validateTwinGroupsForPlacement = (): boolean => {
-    if (!workspace) return false;
+  const validateTwinGroupsForPlacement = (students: Student[], groups: TwinGroupConfig[], nextCount: number): boolean => {
 
     // 1. 그룹별 최소 인원 검증 (그룹이 존재하면 2명 이상이어야 함)
-    for (let i = 0; i < twinGroups.length; i++) {
-      const g = twinGroups[i];
+    for (let i = 0; i < groups.length; i++) {
+      const g = groups[i];
       if (g.studentIds.length < 2) {
         alert(`⚠️ [쌍둥이 그룹 ${i + 1}]에 학생이 2명 이상 지정되어야 합니다.\n학생을 추가하거나 비어있는 그룹을 삭제해주세요.`);
         return false;
@@ -668,11 +679,15 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
 
     // 2. 학생 중복 소속 검증
     const seenIds = new Set<number>();
-    for (let i = 0; i < twinGroups.length; i++) {
-      const g = twinGroups[i];
+    for (let i = 0; i < groups.length; i++) {
+      const g = groups[i];
       for (const sid of g.studentIds) {
+        if (!students.some(student => student.id === sid)) {
+          alert('쌍둥이 그룹의 학생 명단이 변경되었습니다. 전체 취합 현황판에서 그룹을 확인해주세요.');
+          return false;
+        }
         if (seenIds.has(sid)) {
-          const st = workspace.students.find(s => s.id === sid);
+          const st = students.find(s => s.id === sid);
           alert(`⚠️ 학생 [${st?.현학급 || ''}반 ${st?.이름 || sid}]이 여러 쌍둥이 그룹에 중복 소속되어 있습니다.\n확인 후 수정해주세요.`);
           return false;
         }
@@ -681,19 +696,20 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
     }
 
     // 3. 분리 배정 가능 여부 검증 (진급할 학급 수 초과 여부)
-    for (let i = 0; i < twinGroups.length; i++) {
-      const g = twinGroups[i];
-      if (g.option === '분리' && g.studentIds.length > workspace.nextClassCount) {
-        alert(`⚠️ [쌍둥이 그룹 ${i + 1}]의 학생 수(${g.studentIds.length}명)가 진급할 학급 수(${workspace.nextClassCount}개 반)보다 많아 모두 분리 배정할 수 없습니다.\n배정 방식을 '같은 반'으로 변경하거나 학급 수를 확인해주세요.`);
+    for (let i = 0; i < groups.length; i++) {
+      const g = groups[i];
+      if (g.option === '분리' && g.studentIds.length > nextCount) {
+        alert(`⚠️ [쌍둥이 그룹 ${i + 1}]의 학생 수(${g.studentIds.length}명)가 진급할 학급 수(${nextCount}개 반)보다 많아 모두 분리 배정할 수 없습니다.\n배정 방식을 '같은 반'으로 변경하거나 학급 수를 확인해주세요.`);
         return false;
       }
     }
 
     // 4. 미지정 쌍둥이 후보 학생 확인 안내
-    if (unassignedTwinCandidates.length > 0) {
-      const names = unassignedTwinCandidates.map(s => `${s.현학급}반 ${s.이름}`).join(', ');
+    const unassigned = students.filter(student => student.쌍둥이 && !seenIds.has(student.id));
+    if (unassigned.length > 0) {
+      const names = unassigned.map(s => `${s.현학급}반 ${s.이름}`).join(', ');
       const proceed = window.confirm(
-        `⚠️ 아직 쌍둥이 그룹에 지정되지 않은 쌍둥이 표시 학생이 ${unassignedTwinCandidates.length}명 있습니다:\n(${names})\n\n이 학생들은 쌍둥이 제약 없이 일반 학생과 동일하게 배정됩니다.\n그래도 학급편성을 계속 진행하시겠습니까?`
+        `⚠️ 아직 쌍둥이 그룹에 지정되지 않은 쌍둥이 표시 학생이 ${unassigned.length}명 있습니다:\n(${names})\n\n이 학생들은 쌍둥이 제약 없이 일반 학생과 동일하게 배정됩니다.\n그래도 학급편성을 계속 진행하시겠습니까?`
       );
       if (!proceed) return false;
     }
@@ -728,11 +744,6 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
       if (!confirmContinue) return;
     }
 
-    // 쌍둥이 그룹 유효성 검증
-    if (!validateTwinGroupsForPlacement()) {
-      return;
-    }
-
     setLoading(true);
     try {
       const settings: ClassSettings = {
@@ -744,9 +755,25 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
         twinGroups: twinGroups.length > 0 ? twinGroups : undefined
       };
 
-      const placementResult = runPlacementAlgorithm(workspace.students, settings);
+      // 저장 직전 원본과 암호화 수정본을 함께 다시 읽어 최신 특이사항으로 계산합니다.
+      const latest = await getWorkspace(workspace.code);
+      if (!latest || latest.step !== 1) throw new Error('방 상태가 변경되었습니다. 새로고침 후 확인해주세요.');
+      if (JSON.stringify(latest.twinGroups || []) !== JSON.stringify(twinGroups)
+        || latest.currentClassCount !== workspace.currentClassCount || latest.nextClassCount !== workspace.nextClassCount
+        || latest.reductionCount !== workspace.reductionCount || latest.placementOrder !== workspace.placementOrder) {
+        throw new Error('편성 설정 또는 쌍둥이 그룹이 변경되었습니다. 최신 설정을 확인하고 다시 실행해주세요.');
+      }
+      const notes = await listStudentRemarks(workspace.code);
+      const matched = await matchRemarkRecords(latest.students, notes);
+      if (Object.keys(matched).length !== latest.students.length) throw new Error('학생 명단이 변경되었습니다. 최신 명단으로 다시 실행해주세요.');
+      const latestStudents = applyRemarks(latest.students, matched);
+      if (!validateTwinGroupsForPlacement(latestStudents, latest.twinGroups || [], latest.nextClassCount)) return;
+      const latestSettings = { ...settings, currentClassCount: latest.currentClassCount,
+        nextClassCount: latest.nextClassCount, normalCapacity: Math.ceil(latest.students.length / latest.nextClassCount),
+        reductionCount: latest.reductionCount, placementOrder: latest.placementOrder, twinGroups: latest.twinGroups || [] };
+      const placementResult = runPlacementAlgorithm(latestStudents, latestSettings);
 
-      await executeWorkspacePlacement(workspace.code, placementResult, settings);
+      await executeWorkspacePlacement(workspace.code, placementResult, latestSettings, latest);
       alert('🎉 학급편성이 성공적으로 완료되었습니다! 동학년 모든 선생님 화면에 결과가 실시간 반영되었습니다.');
     } catch (err: any) {
       alert('배정 실행 중 오류가 발생했습니다: ' + (err.message || ''));
@@ -1414,17 +1441,20 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
             )}
           </div>
 
-          <PlacementResultDashboard
+          {resultRemarksReady ? <PlacementResultDashboard
             result={workspace.result}
             remarks={visibleRemarks}
-            allStudents={workspace.students}
+            allStudents={effectiveStudents}
             reductionCount={workspace.reductionCount}
             onUpdateResult={isHost ? (up) => {
               void updateWorkspaceResult(workspace.code, up).catch(err => alert('결과 저장 실패: ' + err.message));
             } : undefined}
             onReset={isHost ? handleResetPlacement : undefined}
-            isReadOnly={!isHost}
-          />
+            isReadOnly={!isHost || !resultRemarksReady}
+          /> : <p role="status" className="rounded-xl bg-blue-50 p-4 text-sm text-blue-900">
+            {remarksError ? '특이사항을 불러오지 못해 결과 표시와 조정을 보류했습니다. 위의 다시 불러오기를 눌러주세요.'
+              : '저장된 특이사항을 불러오는 중입니다. 완료 후 편성 결과와 조정 기능이 표시됩니다.'}
+          </p>}
         </div>
       ) : (
         /* STEP 1 & 2: 학생 입력 및 취합 단계 */
@@ -1479,7 +1509,7 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
             <div className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                 {Array.from({ length: workspace.currentClassCount }, (_, i) => i + 1).map((classNum) => {
-                  const classStudents = (workspace.students || []).filter(s => s.현학급 === classNum);
+                  const classStudents = effectiveStudents.filter(s => s.현학급 === classNum);
                   const isCompleted = workspace.classStatus?.[classNum]?.completed;
                   const teacher = workspace.classStatus?.[classNum]?.teacherName || `${classNum}반 담임`;
                   const maleCount = classStudents.filter(s => s.성별 === '남성').length;
@@ -1616,7 +1646,7 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
                       {twinGroups.map((group, gIdx) => {
                         const isSameClass = group.option === '동일';
                         const groupMembers = (group.studentIds || [])
-                          .map(id => workspace.students.find(s => s.id === id))
+                          .map(id => effectiveStudents.find(s => s.id === id))
                           .filter((s): s is Student => !!s);
 
                         return (
@@ -1809,7 +1839,7 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
                   <p className="text-xs text-[#58708f] mt-1">
                     현재 {activeClassTab}반에 {currentTabStudents.length}명의 학생이 등록되어 있습니다.
                   </p>
-                  <p className="text-xs text-slate-500 mt-2">비고는 학급 생성 교사가 입력 완료 전에 수정할 수 있습니다. 입력 완료된 반은 ‘완료 상태 취소’ 후 수정해주세요.</p>
+                  <p className="text-xs text-slate-500 mt-2">엑셀에 입력한 항목은 ‘특이사항 수정’에서 변경할 수 있습니다. 학급 생성 교사만 입력 완료 전에 수정할 수 있으며, 완료된 반은 ‘완료 상태 취소’ 후 수정해주세요.</p>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
@@ -1893,7 +1923,8 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
                           <th className="py-2.5 px-3 text-center">쌍둥이</th>
                           <th className="py-2.5 px-3 text-center">분리배정</th>
                           <th className="py-2.5 px-3 text-center">전출예정</th>
-                          <th className="py-2.5 px-3">비고</th>
+                          <th className="py-2.5 px-3">특이사항 수정</th>
+                          <th className="py-2.5 px-3">추가 메모</th>
                           <th className="py-2.5 px-3 text-center w-16">관리</th>
                         </tr>
                       </thead>
@@ -1925,6 +1956,9 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
                             <td className="py-2.5 px-3 text-center">{st.쌍둥이 ? '👥' : '-'}</td>
                             <td className="py-2.5 px-3 text-center font-mono text-[11px]">{st.분리배정 || '-'}</td>
                             <td className="py-2.5 px-3 text-center">{st.전출예정 ? '✈️' : '-'}</td>
+                            <td className="py-2.5 px-3"><StudentDetailsEditor student={st}
+                              onSave={canEditRemarks && visibleRemarks[remarkKey(st)]?.details ? handleSaveDetails : undefined}
+                              disabledReason={canEditRemarks ? undefined : remarkDisabledReason} /></td>
                             <td className="py-2.5 px-3"><StudentRemark student={st}
                               onSave={canEditRemarks ? handleSaveRemark : undefined}
                               disabledReason={remarksError || remarkDisabledReason} /></td>

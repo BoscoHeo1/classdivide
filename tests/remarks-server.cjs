@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { REMARKS_PATH, listRemarks, updateRemark } = require('../functions/remarks');
+const { REMARKS_PATH, listRemarks, updateRemark, studentDetails } = require('../functions/remarks');
 const key = () => Buffer.alloc(32, 7).toString('base64');
 const code = 'FAKE_ROOM';
 function fixture() {
@@ -33,6 +33,11 @@ function input(root, classNum = 1, studentId = 1000001, text = '새 비고\n두 
   const note = listRemarks(root, code, 'creator', key).notes[`${classNum}:${studentId}`];
   return { classNum, studentId, identity: note.identity, expectedVersion: note.version, expectedText: note.text, text };
 }
+function detailsInput(root, changes = {}, classNum = 1, studentId = 1000001) {
+  const request = input(root, classNum, studentId);
+  const note = listRemarks(root, code, 'creator', key).notes[`${classNum}:${studentId}`];
+  return { ...request, text: note.text, expectedDetails: structuredClone(note.details), details: { ...note.details, ...changes } };
+}
 function unchangedFailure(root, uid, value, expectedCode) {
   const before = JSON.stringify(root);
   assert.equal(updateRemark(root, code, uid, value, key).error.code, expectedCode);
@@ -46,7 +51,8 @@ test('생성자 저장·여러 줄·암호화·단일 학생 변경·재조회·
   const previous = structuredClone(root);
   const request = input(root);
   const saved = updateRemark(root, code, 'creator', request, key, 11);
-  assert.deepEqual(saved, { text: request.text, identity: request.identity, version: 1 });
+  assert.deepEqual(saved, { text: request.text, identity: request.identity, version: 1,
+    details: studentDetails(previous.classdivide_workspaces[code].classInputs[1][0]) });
   assert.equal(root.classdivide_workspaces[code].updatedAt, 11);
   assert.deepEqual(root.classdivide_workspaces[code].classInputs, previous.classdivide_workspaces[code].classInputs);
   assert.deepEqual(root.classdivide_workspaces[code].result, previous.classdivide_workspaces[code].result);
@@ -206,6 +212,173 @@ test('과거 students 배열 및 기존 비고 호환', () => {
   assert.equal(updateRemark(root, code, 'creator', input(root), key).version, 1);
 });
 
+test('엑셀의 기존 특이사항을 읽고 한 학생의 구조화 수정만 암호화·동기화', () => {
+  const root = fixture();
+  const room = root.classdivide_workspaces[code];
+  Object.assign(room.classInputs[1][0], {
+    생활지도: '중', 학생선수: true, 통합학급: true, 학부모민원: true,
+    쌍둥이: true, 쌍둥이옵션: '동일', 전출예정: true, 분리배정: '2반 가상학생C'
+  });
+  const before = structuredClone(root);
+  const initial = listRemarks(root, code, 'teacher', key).notes['1:1000001'];
+  assert.deepEqual(initial.details, {
+    학습부진: true, 생활지도: '중', 학생선수: true, 통합학급: true, 학부모민원: true,
+    쌍둥이: true, 쌍둥이옵션: '동일', 전출예정: true, 분리배정: '2반 가상학생C'
+  });
+  const request = detailsInput(root, { 학습부진: false, 생활지도: '하', 분리배정: '구조화 수정 전용 값' });
+  const saved = updateRemark(root, code, 'creator', request, key, 20);
+  assert.equal(saved.version, 1);
+  assert.equal(saved.text, '원래 비고');
+  assert.deepEqual(saved.details, request.details);
+  assert.equal(root[REMARKS_PATH][code][1][request.identity].format, 2);
+  assert.ok(!JSON.stringify(root[REMARKS_PATH]).includes('구조화 수정 전용 값'));
+  assert.deepEqual(room.classInputs, before.classdivide_workspaces[code].classInputs);
+  assert.deepEqual(room.result, before.classdivide_workspaces[code].result);
+  assert.deepEqual(root.roomMembers, before.roomMembers);
+  assert.deepEqual(root.roomRecovery, before.roomRecovery);
+  assert.deepEqual(root.unrelated, before.unrelated);
+  assert.deepEqual(listRemarks(JSON.parse(JSON.stringify(root)), code, 'teacher', key).notes['1:1000001'], saved);
+  assert.deepEqual(listRemarks(root, code, 'teacher', key).notes['1:1000002'],
+    listRemarks(before, code, 'teacher', key).notes['1:1000002']);
+});
+
+test('구조화 항목 입력의 잘못된 형식·추가 신원필드·누락된 비교값 거부', () => {
+  const root = fixture();
+  const valid = detailsInput(root, { 생활지도: '상' });
+  const partial = { ...valid.details };
+  delete partial.학습부진;
+  for (const details of [null, [], partial,
+    { ...valid.details, 학습부진: 'O' }, { ...valid.details, 생활지도: '최상' },
+    { ...valid.details, 쌍둥이옵션: '같은반' }, { ...valid.details, 분리배정: 123 },
+    { ...valid.details, 분리배정: 'x'.repeat(1001) },
+    { ...valid.details, 이름: '다른 학생' }, { ...valid.details, id: 999 },
+    { ...valid.details, 쌍둥이: false, 쌍둥이옵션: '동일' }]) {
+    unchangedFailure(root, 'creator', { ...valid, details }, 'invalid-argument');
+  }
+  for (const expectedDetails of [undefined, null, partial, { ...valid.expectedDetails, 전출예정: 'false' }]) {
+    unchangedFailure(root, 'creator', { ...valid, expectedDetails }, 'invalid-argument');
+  }
+});
+
+test('구조화 수정도 참여 교사·권한해제·복구관리자·마감 학급에서 저장 차단', () => {
+  for (const uid of ['teacher', 'revoked', 'recovered', 'unknown']) {
+    const root = fixture();
+    unchangedFailure(root, uid, detailsInput(root, { 생활지도: '상' }), 'permission-denied');
+  }
+  for (const state of ['class', 'room']) {
+    const root = fixture();
+    const request = detailsInput(root, { 생활지도: '상' });
+    if (state === 'class') root.classdivide_workspaces[code].classStatus[1].completed = true;
+    else root.classdivide_workspaces[code].step = 3;
+    unchangedFailure(root, 'creator', request, 'failed-precondition');
+  }
+});
+
+test('화면 편집 도중 엑셀 원본 항목이 바뀌면 버전이 같아도 구조화 저장 충돌', () => {
+  const root = fixture();
+  const request = detailsInput(root, { 생활지도: '상' });
+  root.classdivide_workspaces[code].classInputs[1][0].학생선수 = true;
+  unchangedFailure(root, 'creator', request, 'aborted');
+  assert.equal(listRemarks(root, code, 'teacher', key).notes['1:1000001'].version, 0);
+  assert.equal(listRemarks(root, code, 'teacher', key).notes['1:1000001'].details.학생선수, true);
+});
+
+test('동일 학생의 비고·구조화 항목 동시 수정은 충돌하며 다른 학생 저장은 독립', () => {
+  const root = fixture();
+  const structured = detailsInput(root, { 생활지도: '상' });
+  const oldText = input(root, 1, 1000001, '이전 화면 비고');
+  const other = detailsInput(root, { 통합학급: true }, 2, 2000001);
+  const first = updateRemark(root, code, 'creator', structured, key);
+  unchangedFailure(root, 'creator', oldText, 'aborted');
+  const second = updateRemark(root, code, 'creator', other, key);
+  assert.equal(second.details.통합학급, true);
+  assert.deepEqual(listRemarks(root, code, 'teacher', key).notes['1:1000001'], first);
+});
+
+test('자유 비고만 수정해도 구조화 수정본을 유지하고 구조화 저장은 기존 비고 유지', () => {
+  const root = fixture();
+  updateRemark(root, code, 'creator', detailsInput(root, { 학습부진: false, 생활지도: '상' }), key);
+  const afterText = updateRemark(root, code, 'creator', input(root, 1, 1000001, '자유 비고만 수정'), key);
+  assert.equal(afterText.details.학습부진, false);
+  assert.equal(afterText.details.생활지도, '상');
+  assert.equal(afterText.text, '자유 비고만 수정');
+  const afterDetails = updateRemark(root, code, 'creator', detailsInput(root, { 전출예정: true }), key);
+  assert.equal(afterDetails.text, '자유 비고만 수정');
+  assert.equal(afterDetails.details.전출예정, true);
+  assert.equal(afterDetails.details.생활지도, '상');
+  assert.equal(afterDetails.version, 3);
+});
+
+test('수정한 항목만 덮어쓰므로 미수정 항목의 후속 엑셀 값 변경은 반영', () => {
+  const root = fixture();
+  updateRemark(root, code, 'creator', detailsInput(root, { 학습부진: false }), key);
+  const raw = root.classdivide_workspaces[code].classInputs[1][0];
+  raw.학생선수 = true;
+  raw.생활지도 = '중';
+  raw.분리배정 = '새 엑셀 요청';
+  let effective = listRemarks(root, code, 'teacher', key).notes['1:1000001'];
+  assert.equal(effective.details.학습부진, false);
+  assert.equal(effective.details.학생선수, true);
+  assert.equal(effective.details.생활지도, '중');
+  assert.equal(effective.details.분리배정, '새 엑셀 요청');
+  // 원본과 같은 값으로 되돌린 항목은 덮어쓰기에서 빠져 후속 원본 갱신을 받습니다.
+  updateRemark(root, code, 'creator', detailsInput(root, { 학습부진: true }), key);
+  raw.학습부진 = false;
+  effective = listRemarks(root, code, 'teacher', key).notes['1:1000001'];
+  assert.equal(effective.details.학습부진, false);
+});
+
+test('구조화 암호문 형식표시 및 내용 변조는 재조회·재저장 모두 거부하고 자료 보존', () => {
+  for (const tamper of ['format', 'ciphertext']) {
+    const root = fixture();
+    const request = detailsInput(root, { 생활지도: '상' });
+    updateRemark(root, code, 'creator', request, key);
+    const stored = root[REMARKS_PATH][code][1][request.identity];
+    if (tamper === 'format') delete stored.format;
+    else {
+      const bytes = Buffer.from(stored.ciphertext, 'base64');
+      bytes[0] ^= 1;
+      stored.ciphertext = bytes.toString('base64');
+    }
+    const before = JSON.stringify(root);
+    assert.throws(() => listRemarks(root, code, 'creator', key));
+    assert.throws(() => updateRemark(root, code, 'creator', { ...request, expectedVersion: 1 }, key));
+    assert.equal(JSON.stringify(root), before);
+  }
+});
+
+test('JSON처럼 보이는 과거 자유 비고는 구조화 payload로 오인하지 않고 문자 그대로 유지', () => {
+  const root = fixture();
+  const literal = JSON.stringify({ schema: 'student-details-v1', text: '내용', details: { 학습부진: false } });
+  const first = input(root, 1, 1000001, literal);
+  updateRemark(root, code, 'creator', first, key);
+  assert.equal(root[REMARKS_PATH][code][1][first.identity].format, undefined);
+  assert.equal(listRemarks(root, code, 'teacher', key).notes['1:1000001'].text, literal);
+  const converted = updateRemark(root, code, 'creator', detailsInput(root, { 생활지도: '상' }), key);
+  assert.equal(converted.text, literal);
+  assert.equal(converted.details.생활지도, '상');
+  assert.equal(root[REMARKS_PATH][code][1][first.identity].format, 2);
+});
+
+test('명시적 쌍둥이 그룹 소속은 쌍둥이 여부·옵션 변경 차단하고 다른 항목은 허용', () => {
+  for (const change of [{ 쌍둥이: false }, { 쌍둥이옵션: '동일' }]) {
+    const root = fixture();
+    const room = root.classdivide_workspaces[code];
+    room.classInputs[1][0].쌍둥이 = true;
+    room.classInputs[1][0].쌍둥이옵션 = '분리';
+    room.twinGroups = { group: { id: 'group', option: '분리', studentIds: { 0: 1000001, 1: 2000001 } } };
+    unchangedFailure(root, 'creator', detailsInput(root, change), 'failed-precondition');
+    const beforeGroup = structuredClone(room.twinGroups);
+    const saved = updateRemark(root, code, 'creator', detailsInput(root, { 생활지도: '중' }), key);
+    assert.equal(saved.details.생활지도, '중');
+    assert.equal(saved.details.쌍둥이, true);
+    assert.deepEqual(room.twinGroups, beforeGroup);
+    // 그룹을 정리한 뒤에는 다른 학생의 그룹을 건드리지 않고 수정할 수 있습니다.
+    room.twinGroups = [{ id: 'other', option: '동일', studentIds: [1000002, 2000001] }];
+    assert.equal(updateRemark(root, code, 'creator', detailsInput(root, change), key).error, undefined);
+  }
+});
+
 test('별도 비고 저장 경로는 기존 DB 규칙의 기본 거부 경로', () => {
   const rules = JSON.parse(fs.readFileSync(path.join(__dirname, '../database.rules.json'), 'utf8')).rules;
   assert.equal(rules['.read'], false);
@@ -270,6 +443,17 @@ test('callable 연결·해당 방만 조회·인증·트랜잭션 저장 통합 
   assert.equal(JSON.stringify(root), before);
   const reread = await callableExports.listStudentRemarks({ auth: { uid: 'teacher' }, data: { roomCode: code } });
   assert.equal(reread.notes['1:1000001'].text, change.text);
+  const structuredChange = { roomCode: code, ...detailsInput(root, { 생활지도: '상', 통합학급: true }) };
+  const structuredResponse = await callableExports.updateStudentRemark({ auth: { uid: 'creator' }, data: structuredChange });
+  assert.equal(structuredResponse.details.생활지도, '상');
+  assert.equal(structuredResponse.details.통합학급, true);
+  assert.equal(structuredResponse.text, change.text);
+  const structuredReread = await callableExports.listStudentRemarks({ auth: { uid: 'teacher' }, data: { roomCode: code } });
+  assert.deepEqual(structuredReread.notes['1:1000001'], structuredResponse);
+  const structuredBeforeConflict = JSON.stringify(root);
+  await assert.rejects(callableExports.updateStudentRemark({ auth: { uid: 'creator' }, data: structuredChange }),
+    error => error.code === 'aborted');
+  assert.equal(JSON.stringify(root), structuredBeforeConflict);
 });
 
 (async () => {

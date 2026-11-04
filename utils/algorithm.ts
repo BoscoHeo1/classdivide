@@ -32,7 +32,7 @@ export const runPlacementAlgorithm = (
 
   // 1. Twins Logic
   // 🌟 settings.twinGroups가 명시적으로 지정된 경우: 생년월일/이름/성씨 추정 완전 배제, 명시적 그룹 ID 쌍만 반영
-  if (settings.twinGroups && settings.twinGroups.length > 0) {
+  if (Array.isArray(settings.twinGroups)) {
     settings.twinGroups.forEach(group => {
       const ids = group.studentIds || [];
       if (ids.length < 2) return;

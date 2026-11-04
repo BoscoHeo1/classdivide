@@ -17,7 +17,7 @@ interface PlacementResultDashboardProps {
 }
 
 export const PlacementResultDashboard: React.FC<PlacementResultDashboardProps> = ({
-  result,
+  result: storedResult,
   allStudents,
   reductionCount = 2,
   onUpdateResult,
@@ -29,6 +29,7 @@ export const PlacementResultDashboard: React.FC<PlacementResultDashboardProps> =
   const [resultViewMode, setResultViewMode] = useState<'newClass' | 'oldClass'>('newClass');
   const [filterSpecialOnly, setFilterSpecialOnly] = useState<boolean>(false);
   const [swapCandidate, setSwapCandidate] = useState<Student | null>(null);
+  const result = applyResultRemarks(storedResult, remarks)!;
 
   // 모든 배정된 학생 목록
   const allAssignedStudents: Student[] = applyRemarks(Object.values<Student[]>(result.assignments).flat(), remarks);

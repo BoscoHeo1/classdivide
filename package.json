@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "test:capacity": "node tests/capacity.cjs",
-    "test:remarks": "node tests/remarks-server.cjs && node tests/remarks-client.cjs && node tests/standalone-storage.cjs",
+    "test:remarks": "node tests/remarks-server.cjs && node tests/remarks-client.cjs && node tests/standalone-storage.cjs && node tests/student-details.cjs",
     "test:remarks:rules": "node tests/remarks-rules.cjs",
     "test:remarks:ui": "node tests/remarks-ui.cjs",
     "test:remarks:collab-ui": "node tests/remarks-collab-ui.cjs"
