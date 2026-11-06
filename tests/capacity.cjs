@@ -247,6 +247,11 @@ test('작은 명단·반 개수 차이·성비 편중 60개 조합에서 모든 
     execute(example(counts,males), {...base,currentClassCount:oldCount,nextClassCount});
   }
 });
+test('서버 재조회에서 빈 통합학급 배열이 생략돼도 맞교환 검사가 정상 동작', () => {
+  const result = run(students(8, 0), { ...base, currentClassCount: 1, nextClassCount: 2, reductionCount: 0 });
+  delete result.capacityPlan.integratedClasses;
+  assert.equal(getCapacityViolation(result, result.assignments), null);
+});
 let failures = 0;
 for (const { name, fn } of cases) {
   try { fn(); console.log(`PASS ${name}`); }

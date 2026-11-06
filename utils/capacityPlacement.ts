@@ -178,7 +178,7 @@ export const getCapacityViolation = (result: PlacementResult, assignments: Recor
     if (origins && (list.some(s => origins[s.현학급] === undefined) || Object.entries(origins).some(([origin, count]) => list.filter(s => s.현학급 === Number(origin)).length !== count))) {
       return name + '반의 기존 학급별 목표 인원을 유지해야 합니다. 같은 기존 학급·성별 학생을 맞교환해주세요.';
     }
-    if (list.some(s => s.통합학급) !== plan.integratedClasses.includes(name)) return '통합학급 구분이 변경되어 감축 인원이 맞지 않습니다. 설정에서 다시 편성해주세요.';
+    if (list.some(s => s.통합학급) !== (plan.integratedClasses || []).includes(name)) return '통합학급 구분이 변경되어 감축 인원이 맞지 않습니다. 설정에서 다시 편성해주세요.';
   }
   return null;
 };
