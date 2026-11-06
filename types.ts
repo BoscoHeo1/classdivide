@@ -37,6 +37,8 @@ export interface ClassSettings {
 }
 
 export interface CapacityPlan {
+  genderTargets?: Record<string, { male: number; female: number }>;
+  originTargets?: Record<string, Record<number, number>>;
   targets: Record<string, number>;
   integratedClasses: string[];
   requestedNormalCapacity: number;

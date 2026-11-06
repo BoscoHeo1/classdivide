@@ -438,6 +438,9 @@ export const DynamicWizard: React.FC = () => {
 
   return (
     <div className="space-y-5 text-[#172b4d]">
+      <p role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+        자율 기준 모드는 데모입니다. 남녀·기존 반 목표 인원을 지키는 편성은 표준 템플릿 편성 모드를 이용해주세요.
+      </p>
       
       {/* Visual Header Banner */}
       <div className="py-1 flex justify-between items-start gap-4">

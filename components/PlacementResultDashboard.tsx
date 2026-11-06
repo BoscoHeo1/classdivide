@@ -1,4 +1,5 @@
 import { getCapacityViolation } from '../utils/capacityPlacement';
+import { ProportionalSummary } from './ProportionalSummary';
 import React, { useState } from 'react';
 import { Download, FileSpreadsheet, RefreshCw, AlertTriangle, ArrowRight, Users, Layers, ShieldCheck, BookOpen, CheckCircle } from 'lucide-react';
 import { PlacementResult, Student, ClassSettings } from '../types';
@@ -171,6 +172,7 @@ export const PlacementResultDashboard: React.FC<PlacementResultDashboardProps> =
   return (
     <div className="space-y-4">
       {result.capacityPlan && <p role="status" className="rounded-xl bg-blue-50 p-4 text-sm text-blue-900">{result.capacityPlan.message}</p>}
+      <ProportionalSummary result={result} />
       {/* 6대 핵심 지표 통계 카드 */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-[#dce7f3] shadow-[0_1px_3px_rgba(20,65,120,0.04)] flex flex-col justify-between">

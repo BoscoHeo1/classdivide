@@ -1,4 +1,5 @@
 import { getCapacityViolation } from './utils/capacityPlacement';
+import { ProportionalSummary } from './components/ProportionalSummary';
 import React, { useState, useRef, useEffect } from 'react';
 import { Upload, Download, Settings, Users, ArrowRight, CheckCircle, AlertTriangle, FileSpreadsheet, RefreshCw, Layers, Sliders, ShieldCheck, BookOpen } from 'lucide-react';
 import { Student, ClassSettings, PlacementResult } from './types';
@@ -752,6 +753,7 @@ const App: React.FC = () => {
                             </h2>
                         </div>
                         {result.capacityPlan && <p role="status" className="rounded-xl bg-blue-50 p-4 text-sm text-blue-900">{result.capacityPlan.message}</p>}
+                        <ProportionalSummary result={result} />
                         {/* Stats Cards */}
                         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
                             <div className="bg-white p-4 rounded-2xl border border-[#dce7f3] shadow-[0_2px_8px_rgba(20,65,120,0.04)]">

@@ -39,10 +39,27 @@ function checkResult(input, settings, result) {
   assert.equal(new Set(all.map(s => s.id)).size, input.length, '중복 배정 없음');
   assert.equal(Object.keys(plan.targets).length, settings.nextClassCount);
   assert.equal(Object.values(plan.targets).reduce((a, b) => a + b, 0), input.length, '목표 합계 일치');
+  assert.ok(plan.genderTargets && plan.originTargets, '배정 전 남녀·기존 반 목표표 필요');
+  const maleTotal = input.filter(s => s.성별 === '남성').length;
+  const origins = [...new Set(input.map(s => s.현학급))];
+  assert.equal(Object.values(plan.genderTargets).reduce((sum, row) => sum + row.male, 0), maleTotal);
+  for (const origin of origins) {
+    assert.equal(Object.values(plan.originTargets).reduce((sum, row) => sum + row[origin], 0), input.filter(s => s.현학급 === origin).length);
+  }
   for (const [name, group] of Object.entries(result.assignments)) {
     assert.equal(group.length, plan.targets[name], `${name}반 목표 정원 일치`);
     assert.ok(Number.isInteger(plan.targets[name]) && plan.targets[name] >= 0);
     assert.ok(group.every(s => s.배정학급 === name));
+    assert.equal(group.filter(s => s.성별 === '남성').length, plan.genderTargets[name].male);
+    assert.equal(group.filter(s => s.성별 === '여성').length, plan.genderTargets[name].female);
+    const idealMale = input.length ? group.length * maleTotal / input.length : 0;
+    assert.ok(plan.genderTargets[name].male >= Math.floor(idealMale) && plan.genderTargets[name].male <= Math.ceil(idealMale));
+    for (const origin of origins) {
+      const count = group.filter(s => s.현학급 === origin).length;
+      assert.equal(count, plan.originTargets[name][origin]);
+      const ideal = group.length * input.filter(s => s.현학급 === origin).length / input.length;
+      assert.ok(count >= Math.floor(ideal) && count <= Math.ceil(ideal), '기존 반 비례값의 내림·올림 범위 유지');
+    }
   }
   for (const group of settings.twinGroups || []) {
     const found = all.filter(s => group.studentIds.includes(s.id));
@@ -178,9 +195,57 @@ test('수동 정원 검증: 한명 이동/통합구분 변경 차단, 일반학�
   [changedType[intName][idx],changedType[normalName][0]]=[changedType[normalName][0],changedType[intName][idx]];
   assert.ok(getCapacityViolation(result, changedType), '통합구분 변경 차단');
   const ordinarySwap = structuredClone(result.assignments);
-  const a=ordinarySwap[first].findIndex(s=>!s.통합학급),b=ordinarySwap[second].findIndex(s=>!s.통합학급);
+  const a=ordinarySwap[first].findIndex(s=>!s.통합학급 && ordinarySwap[second].some(o=>!o.통합학급 && o.현학급===s.현학급 && o.성별===s.성별));
+  const b=ordinarySwap[second].findIndex(s=>!s.통합학급 && s.현학급===ordinarySwap[first][a].현학급 && s.성별===ordinarySwap[first][a].성별);
   [ordinarySwap[first][a],ordinarySwap[second][b]]=[ordinarySwap[second][b],ordinarySwap[first][a]];
   assert.equal(getCapacityViolation(result, ordinarySwap), null, '인원과 통합구분 유지한 교환 허용');
+});
+function example(counts, males, integrated = 0) {
+  let id = 0;
+  return counts.flatMap((count, origin) => Array.from({ length: count }, (_, index) => ({
+    ...students(1, 0)[0], id: ++id, 현학급: origin + 1, 번호: index + 1,
+    이름: '가상비례' + id, 성별: index < males[origin] ? '남성' : '여성', 통합학급: id <= integrated
+  })));
+}
+test('100명 남60여40/통합 감축: 23·26·26·25명에 성별 목표14·16·15·15 유지', () => {
+  const result = execute(example([25,25,25,25], [15,15,15,15], 1), { ...base, currentClassCount:4, nextClassCount:4 });
+  assert.deepEqual(Object.values(result.assignments).map(rows=>rows.length), [23,26,26,25]);
+  assert.deepEqual(Object.values(result.assignments).map(rows=>rows.filter(s=>s.성별==='남성').length), [14,16,15,15]);
+});
+test('기존 반 총원과 남녀 구성이 크게 달라도 행·열 합계와 비례 범위 보존', () => {
+  execute(example([35,27,19,19], [30,5,15,10], 1), { ...base, currentClassCount:4, nextClassCount:4 });
+});
+test('남학생만 또는 여학생만 있는 명단과 빈 새 학급도 정확히 처리', () => {
+  for (const males of [[17,9], [0,0]]) execute(example([17,9], males), { ...base, currentClassCount:2, nextClassCount:5 });
+  execute(example([1], [1]), { ...base, currentClassCount:1, nextClassCount:4 });
+});
+test('성별 누락은 임의 추정해 성비를 만들지 않고 안내', () => {
+  const input = example([10], [5]); input[0].성별 = '';
+  assert.throws(()=>run(input, { ...base, nextClassCount:2 }), /성별/);
+});
+test('동반 요청이 기존 반 비례 목표와 충돌하면 조용히 몰아넣지 않음', () => {
+  const input = example([2,6], [2,2]);
+  assert.throws(()=>run(input,{...base,currentClassCount:2,nextClassCount:4,twinGroups:[{id:'same',studentIds:[1,2],option:'동일'}]}), /목표|제한/);
+});
+test('총원이 유지돼도 성비·기존 반 목표를 깨는 수동 맞교환은 거부', () => {
+  const result = execute(example([25,25,25,25], [15,15,15,15]), { ...base, currentClassCount:4, nextClassCount:4 });
+  const [a,b] = result.activeClassNames;
+  for (const kind of ['gender','origin']) {
+    const changed = structuredClone(result.assignments);
+    const i = changed[a].findIndex(s=>changed[b].some(o=>kind==='gender' ? o.현학급===s.현학급 && o.성별!==s.성별 : o.성별===s.성별 && o.현학급!==s.현학급));
+    const first = changed[a][i];
+    const j = changed[b].findIndex(o=>kind==='gender' ? o.현학급===first.현학급 && o.성별!==first.성별 : o.성별===first.성별 && o.현학급!==first.현학급);
+    [changed[a][i],changed[b][j]]=[changed[b][j],changed[a][i]];
+    assert.match(getCapacityViolation(result,changed), kind==='gender'?/성비/:/기존 학급/);
+  }
+});
+test('작은 명단·반 개수 차이·성비 편중 60개 조합에서 모든 목표 보존', () => {
+  for(let seed=1;seed<=60;seed++) {
+    const oldCount=seed%7+1, nextClassCount=seed%6+1;
+    const counts=Array.from({length:oldCount},(_,i)=>(seed*7+i*3)%15+1);
+    const males=counts.map((count,i)=>(seed*11+i*5)%(count+1));
+    execute(example(counts,males), {...base,currentClassCount:oldCount,nextClassCount});
+  }
 });
 let failures = 0;
 for (const { name, fn } of cases) {

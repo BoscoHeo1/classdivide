@@ -1,4 +1,5 @@
 import { Student, ClassSettings, PlacementResult } from '../types';
+import { calculateProportionalTargets, canCompleteGender } from './proportionalTargets';
 
 // 목표 인원은 전출 예정자도 포함한 화면 표시 총원으로 계산한다.
 export const placeWithinCapacity = (
@@ -53,8 +54,26 @@ export const placeWithinCapacity = (
   const targetText = names.map(name => `${name}반 ${targets[name]}명`).join(', ');
   const message = `입력 기준 ${normalCapacity}명 → 총 ${students.length}명에 맞춘 일반학급 기본 인원 ${effectiveNormalCapacity}명. ` +
     (normalClasses.length ? `통합학급은 학급당 ${reductionCount}명 감축하며, 나머지 인원은 일반학급부터 배정합니다. ` : '일반학급이 없어 학급 간 인원을 균등하게 배정합니다. ') + targetText;
-  const capacityPlan = { targets, integratedClasses, requestedNormalCapacity: normalCapacity, effectiveNormalCapacity, reductionCount, message };
+  const proportions = calculateProportionalTargets(students, names, targets);
+  const capacityPlan = { ...proportions, targets, integratedClasses, requestedNormalCapacity: normalCapacity, effectiveNormalCapacity, reductionCount, message };
   const assignments: Record<string, Student[]> = Object.fromEntries(names.map(name => [name, []]));
+
+  const origins = Object.keys(proportions.originTargets[names[0]] || {}).map(Number);
+  const originIndex = new Map(origins.map((origin, i) => [origin, i]));
+  const originUsed = origins.map(() => names.map(() => 0));
+  const maleLeft = origins.map(origin => students.filter(s => s.현학급 === origin && s.성별 === '남성').length);
+  const maleSlots = names.map(name => proportions.genderTargets[name].male);
+  const femaleSlots = names.map(name => proportions.genderTargets[name].female);
+  const adjust = (group: Student[], name: string, direction: number) => {
+    const j = names.indexOf(name);
+    for (const s of group) {
+      originUsed[originIndex.get(s.현학급)!][j] += direction;
+      if (s.성별 === '남성') { maleLeft[originIndex.get(s.현학급)!] -= direction; maleSlots[j] -= direction; }
+      else femaleSlots[j] -= direction;
+    }
+  };
+  const genderFeasible = () => canCompleteGender(origins.map((origin, i) => names.map((name, j) =>
+    proportions.originTargets[name][origin] - originUsed[i][j])), maleLeft, maleSlots);
 
   const priority = (g: Student[]) => g.reduce((n, s) => n + (s.생활지도 === '상' ? 8 : 0) +
     (s.학생선수 ? 4 : 0) + (s.학습부진 ? 2 : 0) + (s.학부모민원 ? 1 : 0), 0);
@@ -66,6 +85,11 @@ export const placeWithinCapacity = (
   const canPlace = (group: Student[], name: string) => {
     const list = assignments[name];
     if (list.length + group.length > targets[name]) return false;
+    const j = names.indexOf(name);
+    const male = group.filter(s => s.성별 === '남성').length;
+    if (male > maleSlots[j] || group.length - male > femaleSlots[j]) return false;
+    if (origins.some(origin => originUsed[originIndex.get(origin)!][j] + group.filter(s => s.현학급 === origin).length
+      > proportions.originTargets[name][origin])) return false;
     if (isIntegrated(group) && !integratedClasses.includes(name)) return false;
     return group.every(s => list.every(other => !conflicts.get(s.id)?.has(other.id) && s.이름 !== other.이름));
   };
@@ -105,15 +129,17 @@ export const placeWithinCapacity = (
     candidates.sort((a, b) => score(group, a) - score(group, b));
     for (const name of candidates) {
       assignments[name].push(...group);
-      if (search(index + 1)) return true;
+      adjust(group, name, 1);
+      if (genderFeasible() && search(index + 1)) return true;
+      adjust(group, name, -1);
       assignments[name].splice(assignments[name].length - group.length, group.length);
       if (exhausted) return false;
     }
     return false;
   };
   if (!search(0)) throw new Error(exhausted
-    ? '목표 인원과 분리·같은 반 요청을 함께 만족하는 배정을 제한 시간 안에 찾지 못했습니다. 요청을 확인하고 다시 실행해주세요.'
-    : '목표 인원과 분리·같은 반 요청을 함께 만족할 수 없습니다. 학급 수나 배정 요청을 조정해주세요.');
+    ? '총원·남녀·기존 학급 목표와 분리·같은 반 요청을 함께 만족하는 배정을 제한 시간 안에 찾지 못했습니다. 요청을 확인하고 다시 실행해주세요.'
+    : '계산된 총원·남녀·기존 학급 목표와 분리·같은 반 요청을 함께 만족하지 못했습니다. 학급 수나 배정 요청을 조정해주세요. 목표를 임의로 완화하지 않았습니다.');
 
   for (const name of names) {
     assignments[name].sort((a, b) => Number(a.전출예정) - Number(b.전출예정) || a.이름.localeCompare(b.이름, 'ko'));
@@ -144,6 +170,14 @@ export const getCapacityViolation = (result: PlacementResult, assignments: Recor
   for (const name of result.activeClassNames) {
     const list = assignments[name] || [];
     if (list.length !== plan.targets[name]) return `${name}반 목표 ${plan.targets[name]}명을 유지해야 합니다. 한 명 이동 대신 학생 맞교환을 이용해주세요.`;
+    const gender = plan.genderTargets?.[name];
+    if (gender && (list.filter(s => s.성별 === '남성').length !== gender.male || list.filter(s => s.성별 === '여성').length !== gender.female)) {
+      return name + '반의 성비 목표(남 ' + gender.male + '명·여 ' + gender.female + '명)를 유지해야 합니다. 같은 성별 학생을 맞교환해주세요.';
+    }
+    const origins = plan.originTargets?.[name];
+    if (origins && (list.some(s => origins[s.현학급] === undefined) || Object.entries(origins).some(([origin, count]) => list.filter(s => s.현학급 === Number(origin)).length !== count))) {
+      return name + '반의 기존 학급별 목표 인원을 유지해야 합니다. 같은 기존 학급·성별 학생을 맞교환해주세요.';
+    }
     if (list.some(s => s.통합학급) !== plan.integratedClasses.includes(name)) return '통합학급 구분이 변경되어 감축 인원이 맞지 않습니다. 설정에서 다시 편성해주세요.';
   }
   return null;
