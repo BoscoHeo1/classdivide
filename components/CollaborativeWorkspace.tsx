@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { Student, ClassSettings, PlacementResult, TwinGroupConfig } from '../types';
 import { 
-  createWorkspace, subscribeWorkspace, updateClassStudents, getWorkspace,
+  createWorkspace, updateClassStudents, getWorkspace,
   executeWorkspacePlacement, updateWorkspaceResult, resetWorkspaceToInput, 
   updateWorkspaceSettings, deleteWorkspace, ensureAnonymousUser, getOwnMembership,
   subscribeOwnMembership, requestRoomMembership, subscribeOwnRequest, subscribeJoinRequests,
@@ -47,6 +47,9 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
   const [remarksReady, setRemarksReady] = useState(false);
   const [remarksError, setRemarksError] = useState('');
   const [remarksRefresh, setRemarksRefresh] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshNotice, setRefreshNotice] = useState('');
+  const workspaceRequestRef = useRef(0);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [copiedLink, setCopiedLink] = useState<boolean>(false);
@@ -108,6 +111,32 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
     && workspace?.code === currentCode && Object.values<Student[]>(workspace?.result?.assignments || {}).flat().every(student =>
       visibleRemarks[remarkKey(student)]?.signature === studentSignature(student) && !!visibleRemarks[remarkKey(student)]?.details);
 
+  // 입퇴장·권한 변경·후속 조회를 구분하여 오래된 응답으로 화면을 되돌리지 않습니다.
+  const refreshWorkspace = async (code = currentCode, afterSave = false) => {
+    if (activeRoomRef.current !== code) return;
+    const requestId = ++workspaceRequestRef.current;
+    setRefreshing(true);
+    setRefreshNotice('');
+    try {
+      const updated = await getWorkspace(code);
+      if (requestId !== workspaceRequestRef.current || activeRoomRef.current !== code) return;
+      setWorkspace(updated);
+      setLoading(false);
+      if (updated) localStorage.setItem('classdivide_last_room', code);
+      else setError('방이 삭제되었습니다.');
+    } catch (err: any) {
+      if (requestId !== workspaceRequestRef.current || activeRoomRef.current !== code) return;
+      setLoading(false);
+      const message = afterSave
+        ? '저장은 완료됐지만 최신 자료를 불러오지 못했습니다. 다시 저장하지 말고 새로고침을 눌러주세요.'
+        : '최신 자료를 불러오지 못했습니다. 연결을 확인하고 새로고침을 눌러주세요.';
+      setRefreshNotice(message);
+      if (!workspace) setError(message + ' ' + (err.message || ''));
+    } finally {
+      if (requestId === workspaceRequestRef.current) setRefreshing(false);
+    }
+  };
+
   // Authentication starts only when this collaboration component is mounted.
   useEffect(() => {
     let cancelled = false;
@@ -132,18 +161,19 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
     setRemarks({});
     setRemarksRoomCode('');
     if (!currentCode || !firebaseUid) return;
-    let stopRoom: (() => void) | undefined;
     let stopRequests: (() => void) | undefined;
     setLoading(true);
     const onError = (err: Error) => {
-      stopRoom?.(); stopRoom = undefined;
+      workspaceRequestRef.current++;
       stopRequests?.(); stopRequests = undefined;
-      setWorkspace(null); setMembership(null); setIsHost(false); setLoading(false);
+      setWorkspace(null); setMembership(null); setIsHost(false); setLoading(false); setRefreshing(false);
       setError('방 접근 확인 실패: ' + err.message);
     };
     const stopMember = subscribeOwnMembership(currentCode, firebaseUid, member => {
-      stopRoom?.(); stopRoom = undefined;
+      workspaceRequestRef.current++;
       stopRequests?.(); stopRequests = undefined;
+      setWorkspace(null); setRemarks({}); setRemarksRoomCode(''); setRemarksReady(false);
+      setRefreshing(false);
       setMembership(member);
       setIsHost(member?.active === true && member.role === 'admin');
       setJoinRequests({});
@@ -153,18 +183,14 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
         return;
       }
       setActiveClassTab(member.role === 'admin' ? 0 : member.classNum);
-      stopRoom = subscribeWorkspace(currentCode, updated => {
-        setWorkspace(updated); setLoading(false);
-        if (updated) localStorage.setItem('classdivide_last_room', currentCode);
-        else setError('방이 삭제되었습니다.');
-      }, onError);
+      void refreshWorkspace(currentCode);
       if (member.role === 'admin') stopRequests = subscribeJoinRequests(currentCode, setJoinRequests, onError);
     }, onError);
     const stopRequest = subscribeOwnRequest(currentCode, firebaseUid, setPendingRequest, onError);
-    return () => { stopMember(); stopRequest(); stopRoom?.(); stopRequests?.(); };
+    return () => { workspaceRequestRef.current++; stopMember(); stopRequest(); stopRequests?.(); };
   }, [currentCode, firebaseUid]);
 
-  // 기존 방 구독 알림으로 비고를 다시 읽습니다. 늦게 도착한 이전 방/명단 응답은 버립니다.
+  // 입장·저장·새로고침으로 받은 명단에 맞춰 비고를 한 번 읽고 오래된 응답은 버립니다.
   useEffect(() => {
     let cancelled = false;
     setRemarksReady(false);
@@ -188,9 +214,7 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
       } finally { inFlight = false; }
     };
     void refresh();
-    // 알림 누락이나 일시적인 통신 실패 후에도 별도 외부 서비스 없이 재동기화합니다.
-    const timer = window.setInterval(refresh, 15000);
-    return () => { cancelled = true; window.clearInterval(timer); };
+    return () => { cancelled = true; };
   }, [workspace, membership?.active, remarksRefresh]);
 
   const handleSaveRemark = async (original: Student, text: string, details?: StudentDetails) => {
@@ -203,6 +227,7 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
           previous[remarkKey(original)]?.identity === saved.identity && previous[remarkKey(original)].version > saved.version
             ? previous[remarkKey(original)] : { ...saved, signature: record.signature } }));
       }
+      await refreshWorkspace(workspace.code, true);
     } catch (error: any) {
       if (error?.code === 'functions/aborted') {
         throw new Error('학생 명단 또는 비고가 변경되어 덮어쓰지 않았습니다. 입력 내용을 복사해 두고 취소 후 최신 비고를 다시 열어주세요.');
@@ -348,11 +373,12 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
 
   const handleReviewRequest = async (uid: string, request: JoinRequest, approve: boolean) => {
     if (!workspace || !isHost) return;
-    if (approve && !window.confirm(`${request.teacherName} (${request.classNum}반)의 실제 참여자를 확인하셨나요?\n승인하면 이 방의 학생 데이터 전체를 열람하고 담당 반을 수정할 수 있습니다.`)) return;
+    if (approve && !window.confirm(`${request.teacherName} (${request.classNum}반)의 실제 참여자를 확인하셨나요?\n승인하면 이 방의 담당 학급 학생 데이터만 열람하고 담당 반을 수정할 수 있습니다.`)) return;
     setLoading(true);
     try {
       if (approve) await approveJoinRequest(workspace.code, uid, request);
       else await cancelJoinRequest(workspace.code, uid);
+      await refreshWorkspace(workspace.code, true);
     } catch (err: any) { alert('참여 승인 처리 실패: ' + err.message); }
     finally { setLoading(false); }
   };
@@ -382,8 +408,9 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
         nextClassCount: editNextClasses,
         reductionCount: editReduction
       });
+      await refreshWorkspace(workspace.code, true);
       setShowSettingsModal(false);
-      alert('⚙️ 학년 설정이 성공적으로 변경되었습니다! 동학년 모든 화면에 즉시 반영됩니다.');
+      alert('⚙️ 학년 설정이 성공적으로 변경되었습니다! 다른 선생님은 새로고침하면 변경 내용을 확인할 수 있습니다.');
     } catch (err: any) {
       alert('설정 변경 실패: ' + (err.message || ''));
     } finally {
@@ -472,6 +499,7 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
 
       // 업로드는 현재 완료 상태를 유지합니다. 신규 반은 작성 중이며, 이미 마감한 반은 자동 해제하지 않습니다.
       await updateClassStudents(workspace.code, activeClassTab, formatted, undefined, teacherNameInput);
+      await refreshWorkspace(workspace.code, true);
       alert(`${activeClassTab}반 학생 ${formatted.length}명이 성공적으로 등록되었습니다!`);
     } catch (err: any) {
       alert('엑셀 파일을 읽는 중 오류가 발생했습니다: ' + (err.message || ''));
@@ -494,6 +522,7 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
         !currentCompleted,
         teacherNameInput
       );
+      await refreshWorkspace(workspace.code, true);
     } catch (err: any) { alert('완료 상태 저장 실패: ' + err.message); }
   };
 
@@ -524,6 +553,7 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
     const updated = [...currentTabStudents, studentToAdd];
     try {
       await updateClassStudents(workspace.code, activeClassTab, updated, false, teacherNameInput);
+      await refreshWorkspace(workspace.code, true);
     } catch (err: any) { alert('학생 명단 저장 실패: ' + err.message); return; }
     setShowAddStudentModal(false);
     setNewStudent({
@@ -544,6 +574,7 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
     const updated = currentTabStudents.filter(s => s.id !== studentId);
     try {
       await updateClassStudents(workspace.code, activeClassTab, updated, false, teacherNameInput);
+      await refreshWorkspace(workspace.code, true);
     } catch (err: any) { alert('학생 명단 저장 실패: ' + err.message); return; }
   };
 
@@ -567,6 +598,7 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
     setTwinGroups(newGroups);
     try {
       await updateWorkspaceTwinGroups(workspace.code, newGroups);
+      await refreshWorkspace(workspace.code, true);
       return true;
     } catch (err: any) {
       // 영속 저장 실패 시 이전 상태로 롤백하고 관리자에게 명확하게 오류 표시
@@ -759,10 +791,20 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
 
       // 저장 직전 원본과 암호화 수정본을 함께 다시 읽어 최신 특이사항으로 계산합니다.
       const latest = await getWorkspace(workspace.code);
-      if (!latest || latest.step !== 1) throw new Error('방 상태가 변경되었습니다. 새로고침 후 확인해주세요.');
+      if (!latest || latest.step !== 1) {
+        await refreshWorkspace(workspace.code);
+        throw new Error('방 상태가 변경되었습니다. 최신 자료를 확인하고 다시 실행해주세요.');
+      }
+      if (latest.updatedAt !== workspace.updatedAt
+        || JSON.stringify(latest.students) !== JSON.stringify(workspace.students)
+        || JSON.stringify(latest.classStatus) !== JSON.stringify(workspace.classStatus)) {
+        await refreshWorkspace(workspace.code);
+        throw new Error('학생 명단·특이사항 또는 마감 상태가 변경되었습니다. 불러온 최신 자료를 확인한 뒤 다시 실행해주세요.');
+      }
       if (JSON.stringify(latest.twinGroups || []) !== JSON.stringify(twinGroups)
         || latest.currentClassCount !== workspace.currentClassCount || latest.nextClassCount !== workspace.nextClassCount
         || latest.reductionCount !== workspace.reductionCount || latest.placementOrder !== workspace.placementOrder) {
+        await refreshWorkspace(workspace.code);
         throw new Error('편성 설정 또는 쌍둥이 그룹이 변경되었습니다. 최신 설정을 확인하고 다시 실행해주세요.');
       }
       const notes = await listStudentRemarks(workspace.code);
@@ -776,7 +818,8 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
       const placementResult = runPlacementAlgorithm(latestStudents, latestSettings);
 
       await executeWorkspacePlacement(workspace.code, placementResult, latestSettings, latest);
-      alert('🎉 학급편성이 성공적으로 완료되었습니다! 동학년 모든 선생님 화면에 결과가 실시간 반영되었습니다.');
+      await refreshWorkspace(workspace.code, true);
+      alert('🎉 학급편성이 성공적으로 완료되었습니다! 다른 선생님은 최신 자료를 불러오면 결과를 확인할 수 있습니다.');
     } catch (err: any) {
       alert('배정 실행 중 오류가 발생했습니다: ' + (err.message || ''));
     } finally {
@@ -789,6 +832,7 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
     if (!workspace || !isHost) return;
     if (window.confirm('정말 배정 결과를 초기화하고 학생 입력 단계로 되돌리시겠습니까?')) {
       await resetWorkspaceToInput(workspace.code);
+      await refreshWorkspace(workspace.code, true);
     }
   };
 
@@ -816,6 +860,7 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
     };
 
     await updateWorkspaceResult(workspace.code, updatedResult);
+      await refreshWorkspace(workspace.code, true);
     setSwapCandidate(null);
   };
 
@@ -843,6 +888,7 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
     };
 
     await updateWorkspaceResult(workspace.code, updatedResult);
+      await refreshWorkspace(workspace.code, true);
   };
 
   // VIEW 1: 미입장 상태
@@ -872,15 +918,15 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2.5 py-1 rounded-full flex items-center gap-1">
-                <Users size={13} /> 실시간 동학년 협업
+                <Users size={13} /> 동학년 협업
               </span>
               <span className="text-slate-400 text-xs font-normal tracking-normal">Cloud Realtime Sync</span>
             </div>
             <h2 className="text-xl sm:text-2xl font-extrabold tracking-tight text-[#071747] mt-2">
-              동학년 선생님들과 실시간으로 함께하는 학급편성
+              동학년 선생님들과 함께하는 학급편성
             </h2>
             <p className="text-slate-600 text-sm mt-1">
-              각 반 담임선생님이 자기 반 데이터를 입력하면 실시간으로 자동 취합되고, 학년부장님이 공정하게 배정합니다.
+              각 반 담임선생님이 자기 반 데이터를 저장하면 학년부장님이 최신 자료를 불러와 취합하고 배정합니다.
             </p>
           </div>
           {onBackToStandalone && (
@@ -1141,6 +1187,14 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
   return (
     <div className="max-w-7xl mx-auto py-1 space-y-4">
       {recoveryDialog}
+      <div className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-900">
+        학생 자료는 입장·저장·새로고침할 때 불러옵니다. 다른 선생님이 작업한 내용은 새로고침을 눌러 확인해주세요.
+        <button type="button" onClick={() => void refreshWorkspace()} disabled={refreshing || loading}
+          className="ml-3 inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-white px-3 py-1.5 font-semibold disabled:opacity-50">
+          <RefreshCw size={13} /> {refreshing ? '불러오는 중...' : '최신 자료 불러오기'}
+        </button>
+      </div>
+      {refreshNotice && <p role="alert" className="rounded-xl bg-amber-50 p-3 text-xs text-amber-900">{refreshNotice}</p>}
       {remarksError && <div role="alert" className="rounded-xl bg-amber-50 p-3 text-xs text-amber-900">
         {remarksError} <button type="button" onClick={() => setRemarksRefresh(value => value + 1)}
           className="ml-2 underline">비고 다시 불러오기</button>
@@ -1415,7 +1469,7 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
         </div>
       )}
 
-      {/* STEP 3: 배정 결과 화면 (모든 선생님 동시 열람) */}
+      {/* STEP 3: 배정 결과 화면 (관리자 전체·담임 담당 학급) */}
       {workspace.step === 3 && workspace.result ? (
         <div className="space-y-4">
           <div className="bg-emerald-50 text-[#172b4d] border border-emerald-100 rounded-2xl p-5 shadow-none flex flex-wrap items-center justify-between gap-4">
@@ -1423,12 +1477,12 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
               <div className="flex flex-wrap items-center gap-2">
                 <CheckCircle2 size={20} />
                 <span className="text-xs font-bold tracking-wider uppercase bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
-                  배정 완료 (실시간 동시 공유 중)
+                  배정 완료 ({isHost ? '전체 학급' : '담당 기존 학급 학생만'} 표시)
                 </span>
               </div>
               <h3 className="text-2xl font-bold mt-1">학급편성이 완료되었습니다! 🎉</h3>
               <p className="text-emerald-700 text-xs mt-1">
-                동학년 모든 선생님 화면에 동일한 배정 결과와 특이사항 매트릭스가 실시간으로 표시되고 있습니다.
+                {isHost ? '관리자는 전체 학생의 배정 결과를 확인하고 관리할 수 있습니다.' : '담당 기존 학급 학생의 배정 결과만 표시됩니다. 아래 인원·통계는 학년 전체 또는 새 학급 전체 인원이 아닙니다. 다른 선생님의 변경은 새로고침할 때 반영됩니다.'}
               </p>
             </div>
 
@@ -1449,7 +1503,7 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
             allStudents={effectiveStudents}
             reductionCount={workspace.reductionCount}
             onUpdateResult={isHost ? (up) => {
-              void updateWorkspaceResult(workspace.code, up).catch(err => alert('결과 저장 실패: ' + err.message));
+              void updateWorkspaceResult(workspace.code, up).then(() => refreshWorkspace(workspace.code, true)).catch(err => alert('결과 저장 실패: ' + err.message));
             } : undefined}
             onReset={isHost ? handleResetPlacement : undefined}
             isReadOnly={!isHost || !resultRemarksReady}
@@ -1462,7 +1516,7 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
         /* STEP 1 & 2: 학생 입력 및 취합 단계 */
         <div className="space-y-4">
           <div className="flex flex-wrap items-center gap-2 border-b border-[#dce7f3] pb-3">
-            <button
+            {isHost && <button
               onClick={() => setActiveClassTab(0)}
               className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 cursor-pointer flex items-center gap-2 ${
                 activeClassTab === 0
@@ -1476,9 +1530,9 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
               }`}>
                 {totalStudentsCount}명
               </span>
-            </button>
+            </button>}
 
-            {Array.from({ length: workspace.currentClassCount }, (_, i) => i + 1).map((classNum) => {
+            {Array.from({ length: workspace.currentClassCount }, (_, i) => i + 1).filter(classNum => isHost || classNum === membership?.classNum).map((classNum) => {
               const count = (workspace.students || []).filter(s => s.현학급 === classNum).length;
               const isCompleted = workspace.classStatus?.[classNum]?.completed;
               const isCurrent = activeClassTab === classNum;
@@ -1510,7 +1564,7 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
           {activeClassTab === 0 ? (
             <div className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                {Array.from({ length: workspace.currentClassCount }, (_, i) => i + 1).map((classNum) => {
+                {Array.from({ length: workspace.currentClassCount }, (_, i) => i + 1).filter(classNum => isHost || classNum === membership?.classNum).map((classNum) => {
                   const classStudents = effectiveStudents.filter(s => s.현학급 === classNum);
                   const isCompleted = workspace.classStatus?.[classNum]?.completed;
                   const teacher = workspace.classStatus?.[classNum]?.teacherName || `${classNum}반 담임`;
@@ -1790,7 +1844,7 @@ export const CollaborativeWorkspace: React.FC<CollaborativeWorkspaceProps> = ({ 
                         : `⏳ 현재 ${workspace.currentClassCount - completedClassesCount}개 학급이 학생 명단을 입력 중입니다.`}
                     </h3>
                     <p className="text-xs text-[#58708f] mt-1">
-                      총 {totalStudentsCount}명의 학생이 취합되었으며, 배정 버튼을 누르면 모든 선생님 화면에 결과가 실시간으로 나타납니다.
+                      총 {totalStudentsCount}명의 학생이 취합되었으며, 배정 후 다른 선생님이 최신 자료를 불러오면 결과를 확인할 수 있습니다.
                     </p>
                   </div>
 

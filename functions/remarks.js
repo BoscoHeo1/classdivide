@@ -113,7 +113,8 @@ function listRemarks(root, code, uid, getKey) {
   if (access.error) return access;
   const notes = {};
   const identities = new Set();
-  for (const student of studentsInRoom(access.room)) {
+  for (const student of studentsInRoom(access.room).filter(student =>
+    access.member.role === 'admin' || (Number.isSafeInteger(access.member.classNum) && student.현학급 === access.member.classNum))) {
     const key = `${student.현학급}:${student.id}`;
     const identity = studentIdentity(student);
     if (notes[key] || identities.has(identity)) return fail('failed-precondition', '중복된 학생 식별자가 있습니다. 학급 명단을 확인해주세요.');

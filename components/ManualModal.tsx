@@ -47,7 +47,7 @@ export const ManualModal: React.FC<ManualModalProps> = ({ isOpen, onClose }) => 
                 </p>
               </div>
               <div className="p-4 bg-emerald-50/40 border border-emerald-100 rounded-xl">
-                <span className="font-semibold text-[#172b4d] block text-sm mb-1">🤝 동학년 실시간 협업 모드 (추천!)</span>
+                <span className="font-semibold text-[#172b4d] block text-sm mb-1">🤝 동학년 협업 모드 (추천!)</span>
                 <p className="text-slate-600 text-sm">
                   동학년 선생님들이 교실에서 각자 접속해 자기 반을 입력하고, 학년부장님이 클릭 한 번으로 배정하여 다 함께 확인합니다.
                 </p>
@@ -55,11 +55,11 @@ export const ManualModal: React.FC<ManualModalProps> = ({ isOpen, onClose }) => 
             </div>
           </div>
 
-          {/* 2. 동학년 실시간 협업 워크플로우 */}
+          {/* 2. 동학년 협업 워크플로우 */}
           <div className="space-y-3">
             <h4 className="text-sm sm:text-base font-bold text-[#071747] flex items-center gap-2 border-b border-blue-100 pb-2">
               <span className="w-7 h-7 shrink-0 rounded-lg bg-blue-100 text-blue-700 inline-flex items-center justify-center text-sm">2</span>
-              동학년 실시간 협업 4단계 순서
+              동학년 협업 4단계 순서
             </h4>
             <div className="space-y-2">
               <div className="flex gap-3 items-start p-3 bg-white border border-blue-100 rounded-xl">
@@ -95,9 +95,9 @@ export const ManualModal: React.FC<ManualModalProps> = ({ isOpen, onClose }) => 
               <div className="flex gap-3 items-start p-3 bg-white border border-blue-100 rounded-xl">
                 <span className="p-2 bg-blue-100 text-[#172b4d] rounded-lg shrink-0 mt-0.5"><Download size={14} /></span>
                 <div>
-                  <strong className="text-[#172b4d] block text-sm">Step 4. 실시간 동시 결과 확인 & 엑셀 다운로드</strong>
+                  <strong className="text-[#172b4d] block text-sm">Step 4. 최신 자료 불러오기 & 엑셀 다운로드</strong>
                   <span className="text-slate-500 text-sm">
-                    실행 즉시 모든 선생님 화면에 배정 명렬표와 <strong>특이사항 매트릭스 대시보드</strong>가 동시에 펼쳐지며, 각자 엑셀로 내려받습니다.
+                    관리자는 전체 결과를 확인합니다. 담임은 <strong>최신 자료 불러오기</strong>를 눌러 담당 기존 학급 학생의 배정 결과만 확인하고 내려받습니다. 표시 인원과 통계도 담당 학생 기준입니다.
                   </span>
                 </div>
               </div>
@@ -124,7 +124,7 @@ export const ManualModal: React.FC<ManualModalProps> = ({ isOpen, onClose }) => 
             <ShieldCheck size={20} className="shrink-0 text-blue-600 mt-0.5" />
             <div className="text-sm">
               <strong className="block text-sm text-[#172b4d] mb-1">모드별 데이터 처리 및 저장 안내</strong>
-              단독 모드는 학생 데이터를 브라우저 메모리에서 처리하며 서버에 저장하지 않습니다. 협업 모드는 실시간 협업을 위해 학생 명단, 편성 설정과 결과를 Firebase Realtime Database에 저장·동기화합니다.
+              단독 모드는 학생 데이터를 브라우저 메모리에서 처리하며 서버에 저장하지 않습니다. 협업 자료는 Firebase Realtime Database에 저장합니다. 관리자는 전체 학급, 담임은 승인된 담당 기존 학급만 조회·수정합니다. 다른 선생님의 변경은 최신 자료 불러오기를 눌러 확인하세요. 입장·저장·수동 갱신 때 자료를 불러오며 주기적인 학생 자료 조회는 하지 않습니다.
             </div>
           </div>
         </div>

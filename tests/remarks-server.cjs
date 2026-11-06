@@ -128,7 +128,8 @@ test('관리자와 복구된 관리자는 hostId와 관계없이 모든 반의 �
       assert.equal(saved.details.학생선수, true);
       assert.equal(saved.version, 2);
       assert.equal(root.classdivide_workspaces[code].hostId, 'creator', '기존 생성자 정보 보존');
-      assert.deepEqual(listRemarks(root, code, 'teacher', key).notes[`${classNum}:${studentId}`], saved);
+      assert.deepEqual(listRemarks(root, code, uid, key).notes[`${classNum}:${studentId}`], saved);
+      if (classNum === 2) assert.equal(listRemarks(root, code, 'teacher', key).notes[`${classNum}:${studentId}`], undefined);
     }
   }
 });
@@ -522,7 +523,7 @@ test('callable 연결·해당 방만 조회·인증·트랜잭션 저장 통합 
     throw new Error(`예상하지 못한 의존성: ${name}`);
   };
   const source = fs.readFileSync(path.join(__dirname, '../functions/index.js'), 'utf8');
-  new Function('require', 'exports', source)(load, callableExports);
+  new Function('require', 'exports', 'process', source)(load, callableExports, { env: { FUNCTIONS_EMULATOR: 'true', GCLOUD_PROJECT: 'demo-classdivide-access', FIREBASE_DATABASE_EMULATOR_HOST: '127.0.0.1:19000' } });
   const request = { auth: { uid: 'creator' }, data: { roomCode: code } };
   const initial = await callableExports.listStudentRemarks(request);
   assert.equal(initial.notes['1:1000001'].text, '원래 비고');

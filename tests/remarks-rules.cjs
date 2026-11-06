@@ -52,10 +52,10 @@ function normalizeFirebase(value) {
   const rules = JSON.parse(fs.readFileSync(path.join(__dirname, '../database.rules.json'), 'utf8'));
   assert.equal((await request('PUT', '.settings/rules', rules, 'owner')).status, 200, '현재 규칙을 로컬 시험 namespace에만 적용');
   const workspace = {
-    code: roomCode, name: '가상 규칙 시험', hostId: 'creator', currentClassCount: 1,
+    code: roomCode, name: '가상 규칙 시험', hostId: 'creator', currentClassCount: 2,
     nextClassCount: 1, reductionCount: 0, placementOrder: 'zigzag', step: 1, updatedAt: 1,
-    classStatus: { 1: { completed: false } },
-    classInputs: { 1: [{ id: 1000001, 이름: '학생A', 현학급: 1 }] }
+    classStatus: { 1: { completed: false }, 2: { completed: false } },
+    classInputs: { 1: [{ id: 1000001, 이름: '학생A', 현학급: 1 }], 2: [{ id: 2000001, 이름: '가상타반학생', 현학급: 2 }] }
   };
   const notes = { 1: { fakeIdentity: { ciphertext: '가상 암호문', version: 1 } } };
   const seed = {
@@ -67,8 +67,17 @@ function normalizeFirebase(value) {
     classdivide_student_remarks: { [roomCode]: notes }
   };
   assert.equal((await request('PUT', '', seed, 'owner')).status, 200, '에뮬레이터 관리자 시드');
-  assert.equal((await request('GET', workspacePath, undefined, 'teacher')).status, 200, '기존 승인 참여자의 명단 열람 유지');
+  await denied('GET', workspacePath, undefined, 'teacher');
+  assert.equal((await request('GET', `${workspacePath}/classInputs/1`, undefined, 'teacher')).status, 200, '담임 본인 학급 조회');
+  await denied('GET', `${workspacePath}/classInputs/2`, undefined, 'teacher');
+  await denied('GET', `${workspacePath}/result`, undefined, 'teacher');
+  assert.equal((await request('GET', workspacePath, undefined, 'creator')).status, 200, '관리자 전체 조회 유지');
   assert.equal((await request('PUT', `${workspacePath}/updatedAt`, 2, 'creator')).status, 200, '기존 관리자 권한 유지');
+  assert.equal((await request('PUT', `${workspacePath}/classInputs/1/0/이름`, '가상본인학생', 'teacher')).status, 200, '담임 본인 명단 저장 유지');
+  await denied('PUT', `${workspacePath}/classInputs/2/0/이름`, '타반변경시도', 'teacher');
+  await denied('GET', `${workspacePath}/classStatus/2`, undefined, 'teacher');
+  await denied('GET', `${workspacePath}/classInputs`, undefined, 'teacher');
+  assert.equal((await request('GET', `${workspacePath}/classInputs/2/0/이름`, undefined, 'owner')).body, '가상타반학생', '거부 이후 타반 데이터 보존');
   for (const uid of [undefined, 'creator', 'teacher', 'unknown']) {
     await denied('GET', notesPath, undefined, uid);
     await denied('PUT', `${notesPath}/1/fakeIdentity`, { ciphertext: '교체 시도' }, uid);
@@ -79,5 +88,5 @@ function normalizeFirebase(value) {
   assert.equal((await request('GET', `${workspacePath}/updatedAt`, undefined, 'owner')).body, 2, '복수 경로 쓰기 거부의 원자성');
   assert.equal((await request('PUT', `${workspacePath}/classStatus/1/completed`, true, 'owner')).status, 200);
   await denied('PUT', `${notesPath}/1/fakeIdentity`, { ciphertext: '마감 후 시도' }, 'creator');
-  console.log('PASS 실제 RTDB 규칙: 승인 참여자 기존 열람, 관리자 기존 쓰기, 신규 비고 직접 읽기·쓰기·삭제 차단, 복수 경로 우회 차단, 거부 원자성, 마감 후 직접 쓰기 차단');
+  console.log('PASS 실제 RTDB 규칙: 담임 본인 조회·저장, 타반·부모·결과 접근 거부, 관리자 전체 조회·쓰기, 신규 비고 직접 읽기·쓰기·삭제 차단, 복수 경로 우회 차단, 거부 원자성, 마감 후 직접 쓰기 차단');
 })().catch(error => { console.error(error); process.exitCode = 1; });

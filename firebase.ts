@@ -1,11 +1,15 @@
 import { initializeApp } from "firebase/app";
-import { getAuth, signInAnonymously } from "firebase/auth";
-import { getFunctions, httpsCallable } from "firebase/functions";
-import { getDatabase, ref, set, get, update, onValue, serverTimestamp, runTransaction } from "firebase/database";
+import { getAuth, signInAnonymously, connectAuthEmulator } from "firebase/auth";
+import { getFunctions, httpsCallable, connectFunctionsEmulator } from "firebase/functions";
+import { getDatabase, connectDatabaseEmulator, ref, set, get, update, onValue, serverTimestamp, runTransaction } from "firebase/database";
 import { GradeWorkspace, Student, PlacementResult, ClassSettings, TwinGroupConfig } from "./types";
 import { RemarkRecord, RemarkRecords, resultForStorage } from './utils/remarks';
 
-const firebaseConfig = {
+declare const __CLASSDIVIDE_EMULATOR__: boolean;
+const firebaseConfig = __CLASSDIVIDE_EMULATOR__ ? {
+  apiKey: "demo-classdivide-access", authDomain: "demo-classdivide-access.firebaseapp.com",
+  databaseURL: "https://demo-classdivide-access.firebaseio.com", projectId: "demo-classdivide-access", appId: "demo-classdivide-access"
+} : {
   apiKey: "AIzaSyCJNtARfZj7lndDBR6UUTAJzwClOCndclY",
   authDomain: "class-divide.firebaseapp.com",
   databaseURL: "https://class-divide-default-rtdb.asia-southeast1.firebasedatabase.app",
@@ -18,6 +22,13 @@ const app = initializeApp(firebaseConfig, "classdivide-collab");
 export const rtdb = getDatabase(app);
 const auth = getAuth(app);
 const recoveryFunctions = getFunctions(app, "asia-southeast1");
+// 에뮬레이터 모드는 로컬 가상 자료 검사에서만 사용합니다.
+if (__CLASSDIVIDE_EMULATOR__) {
+  if (!['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)) throw new Error('에뮬레이터 시험은 로컬에서만 실행할 수 있습니다.');
+  connectAuthEmulator(auth, 'http://127.0.0.1:19099', { disableWarnings: true });
+  connectDatabaseEmulator(rtdb, '127.0.0.1', 19000);
+  connectFunctionsEmulator(recoveryFunctions, '127.0.0.1', 19501);
+}
 export interface AdminRecoveryCode { roomCode: string; recoveryCode: string; version: number; }
 export type CollaborationWorkspace = Omit<GradeWorkspace, 'password'>;
 export interface RoomMember { role: 'admin' | 'teacher'; active: boolean; classNum: number; }
@@ -136,13 +147,11 @@ const toWorkspace = (data: any): CollaborationWorkspace | null => {
   return { ...data, students, classStatus: data.classStatus || {}, twinGroups };
 };
 export const getWorkspace = async (rawCode: string): Promise<CollaborationWorkspace | null> => {
-  await requireMember(rawCode);
+  const member = await requireMember(rawCode);
+  if (member.role === 'teacher') return (await httpsCallable<{ roomCode: string }, CollaborationWorkspace>(
+    recoveryFunctions, 'getTeacherWorkspace')({ roomCode: sanitizeCode(rawCode) })).data;
   return toWorkspace((await get(ref(rtdb, `classdivide_workspaces/${sanitizeCode(rawCode)}`))).val());
 };
-export const subscribeWorkspace = (rawCode: string, onUpdate: (workspace: CollaborationWorkspace | null) => void,
-  onError: (error: Error) => void) =>
-  onValue(ref(rtdb, `classdivide_workspaces/${sanitizeCode(rawCode)}`), s => onUpdate(toWorkspace(s.val())), onError);
-
 export const updateClassStudents = async (rawCode: string, classNum: number, newClassStudents: Student[],
   isCompleted: boolean | undefined, teacherName?: string) => {
   const code = sanitizeCode(rawCode);
@@ -181,14 +190,19 @@ export const executeWorkspacePlacement = async (rawCode: string, result: Placeme
     workspace.step, workspace.updatedAt, workspace.students, workspace.classStatus, workspace.twinGroups,
     workspace.currentClassCount, workspace.nextClassCount, workspace.reductionCount, workspace.placementOrder
   ]);
+  let applied = false;
   const outcome = await runTransaction(ref(rtdb, `classdivide_workspaces/${sanitizeCode(rawCode)}`), current => {
+    applied = false;
     const latest = toWorkspace(current);
-    if (!latest || latest.step !== 1 || snapshot(latest) !== snapshot(expected)) return;
+    // 수동 조회는 트랜잭션의 첫 로컬 캐시와 다를 수 있습니다. 현재 값을 그대로 돌려주면
+    // 서버가 해시를 비교하고 최신 자료로 재시도합니다. 실제 서버 값도 다르면 아무것도 바꾸지 않습니다.
+    if (!latest || latest.step !== 1 || snapshot(latest) !== snapshot(expected)) return current;
+    applied = true;
     return normalize({ ...current, step: 3, result: storedResult, updatedAt: Date.now(),
       currentClassCount: settings.currentClassCount, nextClassCount: settings.nextClassCount,
       reductionCount: settings.reductionCount, placementOrder: settings.placementOrder, twinGroups: settings.twinGroups || [] });
   }, { applyLocally: false });
-  if (!outcome.committed) throw new Error('계산 중 학생 명단·특이사항 또는 마감 상태가 변경되었습니다. 최신 값으로 다시 실행해주세요.');
+  if (!outcome.committed || !applied) throw new Error('계산 중 학생 명단·특이사항 또는 마감 상태가 변경되었습니다. 최신 값으로 다시 실행해주세요.');
 };
 export const updateWorkspaceResult = async (rawCode: string, result: PlacementResult) => {
   const workspace = await getWorkspace(rawCode);

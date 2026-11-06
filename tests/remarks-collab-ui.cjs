@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const XLSX = require('xlsx');
 const { chromium } = require(process.argv[2] || process.env.CLASSDIVIDE_PLAYWRIGHT_PATH || 'playwright');
-const project = 'demo-classdivide-remarks';
+const project = 'demo-classdivide-access';
 const code = 'FAKE_COLLAB_UI';
 const base = 'http://127.0.0.1:19000';
 const wp = `classdivide_workspaces/${code}`;
@@ -20,27 +20,18 @@ async function db(method, target, data) {
 const styles = '.hidden{display:none}.whitespace-pre-wrap{white-space:pre-wrap}';
 (async () => {
   const { createServer } = await import('vite');
-  const testPlugin = {
-    name: 'remarks-local-firebase-only', enforce: 'pre',
-    transform(source, id) {
-      if (id.split('?')[0] !== path.join(process.cwd(), 'firebase.ts').replace(/\\/g, '/')) return;
-      assert.ok(source.includes('const firebaseConfig = {') && source.includes('const recoveryFunctions = getFunctions(app, "asia-southeast1");'));
-      let transformed = source.replace(/const firebaseConfig = \{[\s\S]*?\n\};/, `const firebaseConfig = { apiKey: 'demo-key', authDomain: '${project}.firebaseapp.com', databaseURL: 'https://${project}.firebaseio.com', projectId: '${project}', appId: 'demo-app' };`)
-        .replace('getAuth, signInAnonymously', 'getAuth, signInAnonymously, connectAuthEmulator')
-        .replace('getFunctions, httpsCallable', 'getFunctions, httpsCallable, connectFunctionsEmulator')
-        .replace('getDatabase, ref, set,', 'getDatabase, connectDatabaseEmulator, ref, set,')
-        .replace('const recoveryFunctions = getFunctions(app, "asia-southeast1");', `const recoveryFunctions = getFunctions(app, "asia-southeast1");\nconnectAuthEmulator(auth, 'http://127.0.0.1:19099', { disableWarnings: true });\nconnectDatabaseEmulator(rtdb, '127.0.0.1', 19000);\nconnectFunctionsEmulator(recoveryFunctions, '127.0.0.1', 19501);`);
-      assert.ok(!transformed.includes('class-divide-default-rtdb') && !transformed.includes('AIza'), '테스트 변환본에 운영 설정을 남기지 않음');
-      return { code: transformed, map: null };
-    }
-  };
-  const server = await createServer({ plugins: [testPlugin], server: { host: '127.0.0.1', port: 0 } });
+  const server = await createServer({ mode: 'emulator', server: { host: '127.0.0.1', port: 0 } });
   let browser;
   try {
     await server.listen();
     const port = server.httpServer.address().port;
     browser = await chromium.launch({ headless: true, ...(process.argv[3] ? { executablePath: process.argv[3] } : {}) });
     const errors = [];
+    const dataRequests = [];
+    const refresh = async page => {
+      await page.getByRole('button', { name: '최신 자료 불러오기', exact: true }).click();
+      await page.getByRole('button', { name: '최신 자료 불러오기', exact: true }).waitFor();
+    };
     const makeContext = async () => {
       const context = await browser.newContext();
       await context.route('**/*', route => ['127.0.0.1', 'localhost'].includes(new URL(route.request().url()).hostname) ? route.continue() : route.abort());
@@ -53,7 +44,10 @@ const styles = '.hidden{display:none}.whitespace-pre-wrap{white-space:pre-wrap}'
     const teacherContext = await makeContext();
     const creator = await creatorContext.newPage();
     const teacher = await teacherContext.newPage();
-    for (const page of [creator, teacher]) page.on('pageerror', error => errors.push(error.message));
+    for (const page of [creator, teacher]) {
+      page.on('pageerror', error => errors.push(error.message));
+      page.on('request', request => { if (/\/(getTeacherWorkspace|listStudentRemarks)(\?|$)/.test(request.url())) dataRequests.push(request.url()); });
+    }
     const url = `http://127.0.0.1:${port}/classdivide/?room=${code}`;
     await Promise.all([creator.goto(url), teacher.goto(url)]);
     const uid = page => page.evaluate(async () => (await import('/classdivide/firebase.ts')).ensureAnonymousUser());
@@ -85,6 +79,9 @@ const styles = '.hidden{display:none}.whitespace-pre-wrap{white-space:pre-wrap}'
       name: 'fictional-collab.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       buffer: XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' })
     });
+    await edit(teacher).waitFor({ timeout: 45000 });
+    assert.equal(await edit(creator).count(), 0, '담임 업로드는 관리자 화면을 자동 갱신하지 않음');
+    await refresh(creator);
     await edit(creator).waitFor({ timeout: 45000 });
     const uploaded = await db('GET', wp);
     assert.equal(uploaded.classStatus[1].completed, false, '엑셀 업로드만으로 학급을 완료 처리하지 않음');
@@ -101,9 +98,15 @@ const styles = '.hidden{display:none}.whitespace-pre-wrap{white-space:pre-wrap}'
     await teacher.getByLabel('학생선수', { exact: true }).check();
     await teacher.getByLabel('학부모민원', { exact: true }).check();
     await teacher.getByLabel('분리배정', { exact: true }).fill('');
+    await refresh(teacher);
+    assert.equal(await teacher.getByLabel('생활지도', { exact: true }).inputValue(), '상');
+    assert.equal(await teacher.getByLabel('학습부진', { exact: true }).isChecked(), false);
+    pass('명시적 새로고침 중 특이사항 편집 초안 보존');
     await teacher.getByRole('button', { name: '특이사항 저장', exact: true }).click();
     await editDetails(teacher).waitFor();
     await teacher.waitForFunction(() => [...document.querySelectorAll('tbody tr')].some(r => r.textContent.includes('학생A') && r.textContent.includes('생활(상)') && r.textContent.includes('특수(통합)') && r.textContent.includes('민원')));
+    assert.ok(!(await row(creator).textContent()).includes('생활(상)'), '새로고침 전 다른 선생님 변경 미반영');
+    await refresh(creator);
     await creator.waitForFunction(() => [...document.querySelectorAll('tbody tr')].some(r => r.textContent.includes('학생A') && r.textContent.includes('생활(상)')));
     await editDetails(creator).click();
     assert.equal(await creator.getByLabel('학습부진', { exact: true }).isChecked(), false);
@@ -119,6 +122,7 @@ const styles = '.hidden{display:none}.whitespace-pre-wrap{white-space:pre-wrap}'
     await teacher.getByRole('textbox', { name: '학생A 비고', exact: true }).fill('협업 저장\n둘째 줄');
     await teacher.getByRole('button', { name: '저장', exact: true }).click();
     await teacher.getByRole('status').filter({ hasText: '비고가 저장되었습니다.' }).waitFor({ timeout: 45000 });
+    await refresh(creator);
     await creator.waitForFunction(() => [...document.querySelectorAll('tbody tr')].some(r => r.textContent.includes('학생A') && r.textContent.includes('협업 저장\n둘째 줄')));
     await teacher.waitForFunction(() => [...document.querySelectorAll('tbody tr')].some(r => r.textContent.includes('학생A') && r.textContent.includes('협업 저장\n둘째 줄')));
     assert.ok((await row(teacher).textContent()).includes('협업 저장\n둘째 줄'));
@@ -130,18 +134,15 @@ const styles = '.hidden{display:none}.whitespace-pre-wrap{white-space:pre-wrap}'
     pass('실제 DB 암호문 저장 및 기존 학생 원본 보존');
     const teacherAttempt = await teacher.evaluate(async roomCode => {
       const f = await import('/classdivide/firebase.ts');
-      const ws = await f.getWorkspace(roomCode); const notes = await f.listStudentRemarks(roomCode);
-      const target = ws.students.find(student => student.현학급 === 2);
-      try { await f.saveStudentRemark(roomCode, target, notes[`2:${target.id}`], '권한 없는 변경'); return 'unexpected-success'; }
+      const target = { id: 2000001, 현학급: 2 };
+      try { await f.saveStudentRemark(roomCode, target, { identity: '0'.repeat(64), version: 0, text: '' }, '권한 없는 변경'); return 'unexpected-success'; }
       catch (error) { return error.code; }
     }, code);
     assert.equal(teacherAttempt, 'functions/permission-denied');
     pass('담임교사가 다른 반을 지정해 서버 함수를 직접 호출해도 저장 거부');
-    await teacher.getByRole('button', { name: /^2반\s*\d+명/ }).click();
-    assert.equal(await editDetails(teacher, '학생C').count(), 0);
-    assert.equal(await edit(teacher, '학생C').count(), 0);
-    assert.equal(await teacher.getByRole('button', { name: '완료 상태 취소 (작성중으로)', exact: true }).isDisabled(), true);
-    pass('담임교사 타반 열람 화면에서 항목·메모 편집과 마감 취소 제한');
+    assert.equal(await teacher.getByRole('button', { name: /^2반/ }).count(), 0);
+    assert.equal(await teacher.getByText('학생C', { exact: true }).count(), 0);
+    pass('담임교사 화면에 다른 반 탭과 학생 정보가 노출되지 않음');
     await creator.getByRole('button', { name: /^2반\s*\d+명/ }).click();
     await creator.getByRole('button', { name: '완료 상태 취소 (작성중으로)', exact: true }).click();
     await editDetails(creator, '학생C').click();
@@ -204,6 +205,8 @@ const styles = '.hidden{display:none}.whitespace-pre-wrap{white-space:pre-wrap}'
     await creator.getByRole('button', { name: '완료 상태 취소 (작성중으로)', exact: true }).waitFor();
     await creator.waitForFunction(() => !document.querySelector('button[aria-label="학생A 비고 편집"]'));
     assert.equal(await editDetails(creator).count(), 0);
+    assert.equal(await editDetails(teacher).count(), 1, '관리자 마감은 새로고침 전 담임 화면에 자동 반영하지 않음');
+    await refresh(teacher);
     await teacher.waitForFunction(() => !document.querySelector('button[aria-label="학생A 특이사항 수정"]'));
     const teacherClosed = await teacher.evaluate(async roomCode => {
       const f = await import('/classdivide/firebase.ts'); const ws = await f.getWorkspace(roomCode); const notes = await f.listStudentRemarks(roomCode);
@@ -249,9 +252,24 @@ const styles = '.hidden{display:none}.whitespace-pre-wrap{white-space:pre-wrap}'
     assert.equal((await db('GET', wp)).step, 1);
     pass('편성 계산 중 특이사항 저장이 끼어들면 이전 계산 결과 저장 차단');
     await creator.getByRole('button', { name: /전체 취합 현황판/ }).click();
-    creator.once('dialog', dialog => dialog.accept());
+    const changedDialogs = [];
+    const acceptChanged = async dialog => { changedDialogs.push(dialog.message()); await dialog.accept(); };
+    creator.on('dialog', acceptChanged);
+    const changedNotice = creator.waitForEvent('dialog', { predicate: dialog => dialog.message().includes('최신 자료를 확인한 뒤 다시 실행') });
+    await creator.getByRole('button', { name: '👑 학급편성 최종 실행 (관리자)', exact: true }).click();
+    await changedNotice;
+    await creator.getByRole('button', { name: '최신 자료 불러오기', exact: true }).waitFor();
+    assert.equal((await db('GET', wp)).step, 1, '화면 이후 변경된 자료로 바로 편성하지 않음');
+    assert.ok(changedDialogs.some(message => message.includes('최신 자료를 확인한 뒤 다시 실행')));
+    creator.off('dialog', acceptChanged);
+    pass('수동 갱신 이후 숨은 변경 발견 시 편성 중단·최신 자료 표시·재확인 요구');
+    const acceptPlacement = async dialog => { console.log('편성 확인: ' + dialog.message()); await dialog.accept(); };
+    creator.on('dialog', acceptPlacement);
     await creator.getByRole('button', { name: '👑 학급편성 최종 실행 (관리자)', exact: true }).click();
     await creator.getByRole('heading', { name: '학급편성이 완료되었습니다! 🎉', exact: true }).waitFor();
+    creator.off('dialog', acceptPlacement);
+    assert.equal(await teacher.getByRole('heading', { name: '학급편성이 완료되었습니다! 🎉', exact: true }).count(), 0, '편성 결과 자동 수신 없음');
+    await refresh(teacher);
     await teacher.getByRole('heading', { name: '학급편성이 완료되었습니다! 🎉', exact: true }).waitFor();
     const placed = await db('GET', wp);
     assert.equal(placed.step, 3); assert.equal(Object.values(placed.result.assignments).flat().length, 3);
@@ -293,6 +311,11 @@ const styles = '.hidden{display:none}.whitespace-pre-wrap{white-space:pre-wrap}'
     await creator.getByRole('button', { name: '배정 학급 기준 명렬표 다운로드', exact: true }).waitFor();
     assert.ok((await row(creator).textContent()).includes('생활(상)'));
     pass('특이사항 조회 실패 시 잘못된 원본값으로 결과 조작·다운로드 차단, 재조회 후 복원');
+    await teacher.getByRole('button', { name: '배정 학급 기준 명렬표 다운로드', exact: true }).waitFor();
+    const requestsBeforeIdle = dataRequests.length;
+    await new Promise(resolve => setTimeout(resolve, 16500));
+    assert.equal(dataRequests.length, requestsBeforeIdle, '16.5초 유휴 중 2초 학생조회·15초 비고조회가 없어야 함');
+    pass('관리자·담임 유휴 중 반복 자료 요청 없음(기존 2초·15초 주기 모두 초과)');
     console.log(`${results.length}/${results.length} 실제 협업 브라우저 통합 검사 통과`);
   } finally { await browser?.close(); await server.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -14,7 +14,7 @@ import { replaceRemark, replaceResultRemark, studentSignature } from './utils/re
 import { StudentDetails, getStudentDetails, detailsEqual, replaceStudentDetails } from './utils/studentDetails';
 
 const App: React.FC = () => {
-  // 최상위 모드: 단독 모드 (기존) vs 동학년 실시간 협업 모드 (신규)
+  // 최상위 모드: 단독 모드 (기존) vs 동학년 협업 모드 (신규)
   const [mainMode, setMainMode] = useState<'standalone' | 'collab'>(() => {
     const p = new URLSearchParams(window.location.search);
     return p.get('room') ? 'collab' : 'standalone';
@@ -354,7 +354,7 @@ const App: React.FC = () => {
                 <Users className="h-5 w-5" strokeWidth={1.8} />
               </span>
               <div className="min-w-0">
-                <p className="text-xs font-bold text-[#071747]">동학년 실시간 협업</p>
+                <p className="text-xs font-bold text-[#071747]">동학년 협업</p>
                 <p className="text-[11px] text-slate-500 truncate">선생님별 분담 입력 및 자동 취합</p>
               </div>
             </div>
@@ -370,7 +370,7 @@ const App: React.FC = () => {
           </div>
         </section>
 
-        {/* 🌟 최상위 운영 모드 토글: 단독 모드 vs 동학년 실시간 협업 모드 */}
+        {/* 🌟 최상위 운영 모드 토글: 단독 모드 vs 동학년 협업 모드 */}
         <div className="w-full max-w-xl mb-6 bg-white p-1.5 rounded-full grid grid-cols-2 gap-1.5 border border-[#dce7f3] shadow-sm">
           <button
             type="button"
@@ -394,12 +394,12 @@ const App: React.FC = () => {
             }`}
           >
             <Users className="w-4 h-4" />
-            <span>🤝 동학년 실시간 협업</span>
+            <span>🤝 동학년 협업</span>
           </button>
         </div>
 
         {mainMode === 'collab' ? (
-          /* 동학년 실시간 협업 모드 */
+          /* 동학년 협업 모드 */
           <CollaborativeWorkspace onBackToStandalone={() => setMainMode('standalone')} />
         ) : (
           /* 기존 단독 모드 */

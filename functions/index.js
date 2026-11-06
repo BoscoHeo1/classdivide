@@ -8,9 +8,16 @@ const { defineSecret } = require('firebase-functions/params');
 const { REMARKS_PATH, listRemarks, updateRemark } = require('./remarks');
 const remarksKey = defineSecret('STUDENT_REMARKS_KEY');
 
-initializeApp({
-  projectId: 'class-divide',
-  databaseURL: 'https://class-divide-default-rtdb.asia-southeast1.firebasedatabase.app',
+// 운영 연결을 유지하며 로컬 가상 시험만 별도 프로젝트에 연결합니다.
+const isEmulator = process.env.FUNCTIONS_EMULATOR === 'true';
+if (isEmulator && (process.env.GCLOUD_PROJECT !== 'demo-classdivide-access'
+  || !/^(127\.0\.0\.1|localhost):\d+$/.test(process.env.FIREBASE_DATABASE_EMULATOR_HOST || ''))) {
+  throw new Error('시험은 로컬 demo 에뮬레이터에서만 실행할 수 있습니다.');
+}
+initializeApp(isEmulator ? {
+  projectId: 'demo-classdivide-access', databaseURL: 'https://demo-classdivide-access.firebaseio.com'
+} : {
+  projectId: 'class-divide', databaseURL: 'https://class-divide-default-rtdb.asia-southeast1.firebasedatabase.app'
 });
 const options = {
   region: 'asia-southeast1',
@@ -199,4 +206,23 @@ exports.updateStudentRemark = onCall({ ...options, secrets: [remarksKey] }, asyn
     return result.error ? result : ok();
   });
   return result;
+});
+
+// 클라이언트가 보낸 학급 번호는 받지 않고 승인된 회원 정보만 사용합니다.
+exports.getTeacherWorkspace = onCall(options, async request => {
+  const { code, uid } = caller(request);
+  const db = getDatabase();
+  const member = (await db.ref(`roomMembers/${code}/${uid}`).get()).val();
+  if (member?.active !== true || member.role !== 'teacher') {
+    throw new HttpsError('permission-denied', '승인된 담임 권한이 필요합니다.');
+  }
+  const room = (await db.ref(`classdivide_workspaces/${code}`).get()).val();
+  // 조회 중 권한 회수나 담당 반 변경이 생기면 이전 권한으로 자료를 반환하지 않습니다.
+  const latestMember = (await db.ref(`roomMembers/${code}/${uid}`).get()).val();
+  if (latestMember?.active !== true || latestMember.role !== 'teacher' || latestMember.classNum !== member.classNum) {
+    throw new HttpsError('permission-denied', '담당 학급 권한이 변경되었습니다. 다시 입장해주세요.');
+  }
+  const result = require('./teacherAccess').teacherWorkspace(room, latestMember);
+  if (result.error) throw new HttpsError(result.error.code, result.error.message);
+  return result.workspace;
 });

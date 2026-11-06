@@ -12,6 +12,7 @@ export default defineConfig(({ mode }) => {
       },
       plugins: [react()],
       define: {
+        __CLASSDIVIDE_EMULATOR__: JSON.stringify(mode === "emulator"),
         'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
         'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
       },

@@ -4,7 +4,7 @@
     ".write": false,
     "classdivide_workspaces": {
       "$roomCode": {
-        ".read": "auth != null && root.child('roomMembers').child($roomCode).child(auth.uid).child('active').val() == true",
+        ".read": "auth != null && root.child('roomMembers').child($roomCode).child(auth.uid).child('active').val() == true && root.child('roomMembers').child($roomCode).child(auth.uid).child('role').val() == 'admin'",
         ".write": "(auth != null && root.child('roomMembers').child($roomCode).child(auth.uid).child('active').val() == true && root.child('roomMembers').child($roomCode).child(auth.uid).child('role').val() == 'admin' && newData.exists()) || (auth != null && !data.exists() && !root.child('roomMembers').child($roomCode).exists() && !root.child('roomSecrets').child($roomCode).exists() && !root.child('roomRecovery').child($roomCode).exists() && !newData.child('recoveryInstanceId').exists() && newData.child('hostId').val() == auth.uid && newData.child('step').val() == 1 && !newData.child('result').exists() && !newData.child('classInputs').exists())",
         ".validate": "newData.hasChildren(['code','name','hostId','currentClassCount','nextClassCount','reductionCount','placementOrder','step','updatedAt']) && (!data.exists() || newData.child('hostId').val() == data.child('hostId').val()) && (!data.child('recoveryInstanceId').exists() || (newData.child('recoveryInstanceId').exists() && newData.child('recoveryInstanceId').val() == data.child('recoveryInstanceId').val()))",
         "code": {
@@ -77,7 +77,8 @@
               "$field": {
                 ".validate": "newData.isString() || newData.isNumber() || newData.isBoolean()"
               }
-            }
+            },
+            ".read": "auth != null && root.child('roomMembers').child($roomCode).child(auth.uid).child('active').val() == true && root.child('roomMembers').child($roomCode).child(auth.uid).child('role').val() == 'teacher' && $classNum == (root.child('roomMembers').child($roomCode).child(auth.uid).child('classNum').val() + '')"
           }
         },
         "classStatus": {
@@ -95,7 +96,8 @@
             },
             "$other": {
               ".validate": false
-            }
+            },
+            ".read": "auth != null && root.child('roomMembers').child($roomCode).child(auth.uid).child('active').val() == true && root.child('roomMembers').child($roomCode).child(auth.uid).child('role').val() == 'teacher' && $classNum == (root.child('roomMembers').child($roomCode).child(auth.uid).child('classNum').val() + '')"
           }
         },
         "recoveryInstanceId": {
