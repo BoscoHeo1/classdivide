@@ -9,7 +9,7 @@ import ClassTable from './components/ClassTable';
 import { DynamicWizard } from './components/DynamicWizard';
 import { CollaborativeWorkspace } from './components/CollaborativeWorkspace';
 import { ManualModal } from './components/ManualModal';
-import { loadStandalone, saveStandalone, StandaloneSnapshot } from './utils/standaloneStorage';
+import { loadStandalone, saveStandalone, clearStandalone, StandaloneSnapshot } from './utils/standaloneStorage';
 import { replaceRemark, replaceResultRemark, studentSignature } from './utils/remarks';
 import { StudentDetails, getStudentDetails, detailsEqual, replaceStudentDetails } from './utils/studentDetails';
 
@@ -49,6 +49,8 @@ const App: React.FC = () => {
   const [storageLoaded, setStorageLoaded] = useState(false);
   const [storageBlocked, setStorageBlocked] = useState(false);
   const [storageError, setStorageError] = useState('');
+  const [storageSaving, setStorageSaving] = useState(false);
+  const storageSaveSequence = useRef(0);
   const [remarkSaving, setRemarkSaving] = useState(false);
   const remarkSaveInFlight = useRef(false);
   const snapshotRef = useRef<StandaloneSnapshot>(null);
@@ -66,16 +68,38 @@ const App: React.FC = () => {
     }).catch(() => {
       if (cancelled) return;
       setStorageBlocked(true); setStorageLoaded(true);
-      setStorageError('이 탭의 저장 자료를 복원하지 못했습니다. 기존 저장 자료는 보존되며 자동 저장을 중단했습니다.');
+      setStorageError('이 브라우저의 저장 자료를 복원하지 못했습니다. 기존 저장 자료는 보존되며 자동 저장을 중단했습니다.');
     });
     return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
     if (!storageLoaded || storageBlocked || mainMode !== 'standalone') return;
-    saveStandalone({ students, result, settings, step, fileName }).then(() => setStorageError(''))
-      .catch(() => setStorageError('이 탭에 작업 내용을 저장하지 못했습니다. 저장 공간과 브라우저 설정을 확인해주세요.'));
+    const sequence = ++storageSaveSequence.current;
+    setStorageSaving(true);
+    saveStandalone({ students, result, settings, step, fileName }).then(() => {
+      if (sequence === storageSaveSequence.current) setStorageError('');
+    }).catch((error: Error) => {
+      if (sequence !== storageSaveSequence.current) return;
+      setStorageBlocked(true);
+      setStorageError(`${error.message} 현재 화면은 유지됩니다. 결과를 내려받고 다른 탭을 닫은 뒤 새로고침해 주세요.`);
+    }).finally(() => { if (sequence === storageSaveSequence.current) setStorageSaving(false); });
   }, [storageLoaded, storageBlocked, mainMode, students, result, settings, step, fileName]);
+
+  // 저장 중 탭을 닫으면 마지막 변경이 빠질 수 있어 브라우저의 종료 확인을 요청합니다.
+  useEffect(() => {
+    if (!storageSaving) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [storageSaving]);
+
+  const handleClearStandalone = async () => {
+    if (!window.confirm('이 브라우저에 저장된 단독 모드의 학생 명단·설정·편성 결과를 삭제할까요? 필요한 결과는 먼저 엑셀로 내려받아 주세요. 협업 서버 자료는 삭제하지 않습니다.')) return;
+    setStorageBlocked(true); setStorageSaving(true);
+    try { await clearStandalone(); window.location.reload(); }
+    catch { setStorageSaving(false); setStorageError('저장 자료를 삭제하지 못했습니다. 기존 자료는 유지됩니다. 새로고침 후 다시 시도해 주세요.'); }
+  };
 
   const handleSaveRemark = async (original: Student, text: string) => {
     if (remarkSaveInFlight.current) throw new Error('다른 비고를 저장 중입니다. 잠시 후 다시 시도해주세요.');
@@ -286,7 +310,7 @@ const App: React.FC = () => {
     }
   });
 
-  if (!storageLoaded) return <p className="p-8" role="status">이 탭의 작업 내용을 불러오는 중…</p>;
+  if (!storageLoaded) return <p className="p-8" role="status">이 브라우저의 작업 내용을 불러오는 중…</p>;
 
   return (
     <div className="min-h-screen bg-[#f8fbff] text-[#172b4d] font-sans pb-12 sm:pb-16">
@@ -304,7 +328,7 @@ const App: React.FC = () => {
           <div className="flex items-center gap-2 sm:gap-3">
             <div className="hidden md:inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50/70 border border-blue-100 rounded-full text-xs text-slate-600">
               <ShieldCheck className="w-3.5 h-3.5 text-[#1677ed] shrink-0" />
-              <span>단독: 이 탭에 암호화 저장 · 협업: 서버 동기화</span>
+              <span>단독: 이 브라우저에 암호화 저장 · 협업: 서버 동기화</span>
             </div>
             <button
               type="button"
@@ -321,7 +345,14 @@ const App: React.FC = () => {
       {/* Main Content */}
       <main inert={remarkSaving || undefined} className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 sm:pt-8">
         {mainMode === 'standalone' && storageError && <p role="alert" className="mb-4 p-3 bg-amber-50 text-amber-900 rounded-xl">{storageError}</p>}
-        {mainMode === 'standalone' && <p className="mb-3 text-xs text-slate-500">일반모드 작업은 이 탭에만 암호화 저장됩니다. 새로고침 후 복원되며 탭을 닫으면 종료됩니다.</p>}
+        {mainMode === 'standalone' && <div className="mb-3 rounded-xl border border-blue-100 bg-white p-3 text-xs text-slate-600">
+          <p>표준 편성 작업은 이 브라우저에 암호화 저장됩니다. 탭을 닫아도 같은 브라우저·프로필에서 이어서 작업할 수 있습니다.</p>
+          <p className="mt-1">브라우저 데이터 삭제·시크릿 모드에서는 복원을 보장하지 않습니다. 공용 PC에서는 사용 후 저장 자료를 삭제하고, 결과는 엑셀로 따로 보관하세요. 자율 기준 동적 편성 데모는 저장 대상이 아닙니다.</p>
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            <span role="status">{storageSaving ? '브라우저에 저장 중… 탭을 닫지 마세요.' : storageBlocked ? '자동 저장 중단' : '브라우저 저장 완료'}</span>
+            <button type="button" onClick={handleClearStandalone} disabled={storageSaving || remarkSaving} className="rounded-lg border border-slate-200 px-3 py-1.5 text-slate-700 hover:bg-slate-50 disabled:opacity-50">이 브라우저 저장 자료 삭제</button>
+          </div>
+        </div>}
 
         {/* 🌟 Bosco 스타일 Hero Section */}
         <section aria-labelledby="classdivide-hero-title" className="mb-6 overflow-hidden rounded-3xl border border-blue-100 bg-[#eaf4ff] p-6 sm:p-8">
