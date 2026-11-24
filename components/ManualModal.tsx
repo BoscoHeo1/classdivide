@@ -124,7 +124,7 @@ export const ManualModal: React.FC<ManualModalProps> = ({ isOpen, onClose }) => 
             <ShieldCheck size={20} className="shrink-0 text-blue-600 mt-0.5" />
             <div className="text-sm">
               <strong className="block text-sm text-[#172b4d] mb-1">모드별 데이터 처리 및 저장 안내</strong>
-              단독 모드는 학생 데이터를 브라우저 메모리에서 처리하며 서버에 저장하지 않습니다. 협업 자료는 Firebase Realtime Database에 저장합니다. 관리자는 전체 학급, 담임은 승인된 담당 기존 학급만 조회·수정합니다. 다른 선생님의 변경은 최신 자료 불러오기를 눌러 확인하세요. 입장·저장·수동 갱신 때 자료를 불러오며 주기적인 학생 자료 조회는 하지 않습니다.
+              단독 표준 편성은 학생 명단·설정·편성 결과를 이 브라우저에 암호화 저장하며 서버로 보내지 않습니다. 탭을 닫아도 같은 브라우저·프로필에서 복원됩니다. 브라우저 데이터 삭제·시크릿 모드에서는 보장되지 않으며 공용 PC에서는 사용 후 저장 자료를 삭제하세요. 결과 엑셀도 따로 보관하세요. 자율 기준 동적 편성 데모는 자동 저장하지 않습니다. 협업 자료는 Firebase Realtime Database에 저장합니다. 관리자는 전체 학급, 담임은 승인된 담당 기존 학급만 조회·수정합니다. 다른 선생님의 변경은 최신 자료 불러오기를 눌러 확인하세요. 입장·저장·수동 갱신 때 자료를 불러오며 주기적인 학생 자료 조회는 하지 않습니다.
             </div>
           </div>
         </div>

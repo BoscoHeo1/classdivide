@@ -23,7 +23,7 @@ const { chromium } = require(process.argv[2] || process.env.CLASSDIVIDE_PLAYWRIG
       await page.goto(`http://127.0.0.1:${port}/classdivide/`);
       // CDN 차단 상태에서도 기존 단계별 숨김을 적용합니다.
       await page.addStyleTag({ content: '.hidden{display:none}.whitespace-pre-wrap{white-space:pre-wrap}' });
-      await page.getByText('일반모드 작업은 이 탭에만 암호화 저장됩니다.', { exact: false }).waitFor();
+      await page.getByText('표준 편성 작업은 이 브라우저에 암호화 저장됩니다.', { exact: false }).waitFor();
     };
     await open();
     const wb = XLSX.utils.book_new();
@@ -55,11 +55,11 @@ const { chromium } = require(process.argv[2] || process.env.CLASSDIVIDE_PLAYWRIG
     console.log('PASS 새로고침 후 명단·비고 복원');
     await editA().click();
     await page.getByRole('textbox', { name: '학생A 비고', exact: true }).fill('실패 후 재시도');
-    await page.evaluate(() => { window.__setItem = Storage.prototype.setItem; Storage.prototype.setItem = function(key, value) { if (key === 'classdivide_standalone_encrypted_v1') throw new DOMException('시험 저장 실패', 'QuotaExceededError'); return window.__setItem.call(this, key, value); }; });
+    await page.evaluate(() => { window.__put = IDBObjectStore.prototype.put; IDBObjectStore.prototype.put = function(value, key) { if (this.name === 'workspace') throw new DOMException('시험 저장 실패', 'QuotaExceededError'); return window.__put.call(this, value, key); }; });
     await page.getByRole('button', { name: '저장', exact: true }).click();
     await page.getByRole('alert').filter({ hasText: '비고를 저장하지 못했습니다.' }).waitFor();
     assert.equal(await page.getByRole('textbox', { name: '학생A 비고', exact: true }).inputValue(), '실패 후 재시도');
-    await page.evaluate(() => { Storage.prototype.setItem = window.__setItem; });
+    await page.evaluate(() => { IDBObjectStore.prototype.put = window.__put; });
     await page.getByRole('button', { name: '저장', exact: true }).click();
     await editA().waitFor();
     assert.equal(await editA().innerText(), '실패 후 재시도');
@@ -98,12 +98,12 @@ const { chromium } = require(process.argv[2] || process.env.CLASSDIVIDE_PLAYWRIG
     assert.equal(await detailsA().getByLabel('쌍둥이 배정', { exact: true }).isDisabled(), true);
     await detailsA().getByLabel('생활지도', { exact: true }).selectOption('상');
     await detailsA().getByLabel('분리배정', { exact: true }).fill('');
-    await page.evaluate(() => { window.__setItem = Storage.prototype.setItem; Storage.prototype.setItem = function(key, value) { if (key === 'classdivide_standalone_encrypted_v1') throw new DOMException('특이사항 시험 저장 실패', 'QuotaExceededError'); return window.__setItem.call(this, key, value); }; });
+    await page.evaluate(() => { window.__put = IDBObjectStore.prototype.put; IDBObjectStore.prototype.put = function(value, key) { if (this.name === 'workspace') throw new DOMException('특이사항 시험 저장 실패', 'QuotaExceededError'); return window.__put.call(this, value, key); }; });
     await page.getByRole('button', { name: '특이사항 저장', exact: true }).click();
     await page.getByRole('alert').filter({ hasText: '특이사항' }).waitFor();
     assert.equal(await detailsA().getByRole('checkbox', { name: '학생선수', exact: true }).isChecked(), true);
     assert.equal(await detailsA().getByLabel('생활지도', { exact: true }).inputValue(), '상');
-    await page.evaluate(() => { Storage.prototype.setItem = window.__setItem; });
+    await page.evaluate(() => { IDBObjectStore.prototype.put = window.__put; });
     await page.getByRole('button', { name: '특이사항 저장', exact: true }).click();
     await page.getByRole('status').filter({ hasText: '특이사항이 변경되었습니다.' }).waitFor();
     await editDetailsB().click();
